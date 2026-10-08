@@ -111,6 +111,33 @@ class StudyStats {
   double get timeoutShare => total == 0 ? 0 : timeouts / total;
 }
 
+/// P(bounce | max_wick ≥ d) for d = 0.0 … 1.3 (step 0.1) over non-timeout events, null where
+/// n < [kMinCurveN]. One pass: each event counts for every threshold up to the deepest it reached.
+({List<double?> curve, List<int> curveN}) depthCurve(Iterable<FvgEvent> evs) {
+  const steps = 14;
+  double th(int k) => k / 10 - 1e-9; // same thresholds as the study's d loop
+  final n = List<int>.filled(steps, 0), nb = List<int>.filled(steps, 0);
+  for (final e in evs) {
+    if (e.outcome == EvOutcome.timeout) continue;
+    final w = e.maxWick;
+    var k = min(steps - 1, ((w + 1e-9) * 10).floor());
+    while (k < steps - 1 && w >= th(k + 1)) {
+      k++;
+    }
+    while (k >= 0 && w < th(k)) {
+      k--;
+    }
+    if (k < 0) continue;
+    n[k]++;
+    if (e.outcome == EvOutcome.bounce) nb[k]++;
+  }
+  for (var k = steps - 2; k >= 0; k--) {
+    n[k] += n[k + 1];
+    nb[k] += nb[k + 1];
+  }
+  return (curve: [for (var k = 0; k < steps; k++) n[k] < kMinCurveN ? null : nb[k] / n[k]], curveN: n);
+}
+
 StudyStats computeStats(List<FvgEvent> evs) {
   var b = 0, t = 0, to = 0, barsSum = 0, barsN = 0;
   final wicks = <double>[];
@@ -133,18 +160,7 @@ StudyStats computeStats(List<FvgEvent> evs) {
   }
   wicks.sort();
 
-  final curve = <double?>[], curveN = <int>[];
-  for (var k = 0; k <= 13; k++) {
-    final d = k / 10 - 1e-9;
-    var n = 0, nb = 0;
-    for (final e in evs) {
-      if (e.outcome == EvOutcome.timeout || e.maxWick < d) continue;
-      n++;
-      if (e.outcome == EvOutcome.bounce) nb++;
-    }
-    curveN.add(n);
-    curve.add(n < kMinCurveN ? null : nb / n);
-  }
+  final (:curve, :curveN) = depthCurve(evs);
 
   return StudyStats(
     total: evs.length,

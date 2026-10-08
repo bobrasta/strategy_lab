@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'baseline.dart' show siblingPath;
 import 'events.dart';
+import 'loaders.dart';
 import 'stats.dart';
 
 double? _d(Object? v) => v is num ? v.toDouble() : null;
@@ -92,16 +93,32 @@ class ConditionsSummary {
 }
 
 /// The app-side test for one JSON bucket, or null for a feature the app doesn't know.
-bool Function(FvgEvent)? bucketTest(String feature, String bucket) => switch (feature) {
-      'all' => (_) => true,
-      'disp_q' => (e) => e.dispQ != null && e.dispQ == normalizeDisp(bucket),
-      'trend' => (e) => e.htfTrend != null && e.htfTrend == normalizeTrend(bucket),
-      'age_b' => (e) => e.ageBucket != null && e.ageBucket == normalizeAge(bucket),
-      'touch_session' => (e) => e.touchSession != null && e.touchSession == normalizeSession(bucket),
-      'form_session' => (e) => e.session == normalizeSession(bucket),
-      'sweep_b' => (e) => e.sweep != null && e.sweep == parseBool(bucket),
-      _ => null,
-    };
+/// The bucket label is normalised once, not per event.
+bool Function(FvgEvent)? bucketTest(String feature, String bucket) {
+  switch (feature) {
+    case 'all':
+      return (_) => true;
+    case 'disp_q':
+      final v = normalizeDisp(bucket);
+      return (e) => v != null && e.dispQ == v;
+    case 'trend':
+      final v = normalizeTrend(bucket);
+      return (e) => v != null && e.htfTrend == v;
+    case 'age_b':
+      final v = normalizeAge(bucket);
+      return (e) => v != null && e.ageBucket == v;
+    case 'touch_session':
+      final v = normalizeSession(bucket);
+      return (e) => v != null && e.touchSession == v;
+    case 'form_session':
+      final v = normalizeSession(bucket);
+      return (e) => v != null && e.session == v;
+    case 'sweep_b':
+      final v = parseBool(bucket);
+      return (e) => v != null && e.sweep == v;
+  }
+  return null;
+}
 
 String verdictCode(Verdict v) => switch (v) {
       Verdict.candidate => 'candidate',
@@ -140,4 +157,14 @@ List<String> crossCheck(ConditionsSummary s, List<FvgEvent> real, List<FvgEvent>
     if (!ok) out.add('${periodLabel(r.period)} ${r.feature}=${r.bucket}');
   }
   return out;
+}
+
+/// [crossCheck] from files only, so it can run in a background isolate.
+/// Null when the JSON or a companion file is missing.
+Future<List<String>?> crossCheckFiles(String eventsPath) async {
+  final sum = await ConditionsSummary.loadNextTo(eventsPath);
+  final fake = siblingPath(eventsPath, 'fvg_fake_events.csv'), ctrl = siblingPath(eventsPath, 'fvg_control_events.csv');
+  if (sum == null || !File(fake).existsSync() || !File(ctrl).existsSync()) return null;
+  return crossCheck(sum, parseEventsFile(eventsPath).events, parseEventsFile(fake, companion: true).events,
+      parseEventsFile(ctrl, companion: true).events);
 }

@@ -87,6 +87,12 @@ class AppState extends ChangeNotifier {
 
   /// Companion outputs from the study, matched by the same filters.
   List<FvgEvent> fakeEvents = const [], controlEvents = const [];
+
+  /// [controlEvents] split by kind once at load.
+  List<FvgEvent> get _controlReal => _ctrlSplit.$1;
+  List<FvgEvent> get _controlFake => _ctrlSplit.$2;
+  (List<FvgEvent>, List<FvgEvent>) _ctrlSplit = (const [], const []);
+  List<FvgEvent>? _ctrlSplitOf;
   Set<String> eventColumns = const {};
   Comparison comparison = const Comparison(RateSummary(0, 0, 0), null, null, null);
   List<double?>? fakeCurve;
@@ -275,11 +281,11 @@ class AppState extends ChangeNotifier {
       notes.add('fvg_control_events.csv needs a kind column (real / fake). Re-run fvg_conditions.py.');
       controlEvents = const [];
     }
-    await _crossCheckSummary(path, notes);
     holdoutRevealedAt = await _readHoldout(path);
     final missingCols = _filterColumn.entries.where((e) => !eventColumns.contains(e.value)).map((e) => e.key).toList();
     if (missingCols.isNotEmpty) notes.add('No ${missingCols.join(', ')} column in fvg_events.csv, so those filters are off.');
     await _mapAndApply(notes);
+    _crossCheckSummary(path);
   }
 
   Future<List<FvgEvent>> _loadCompanion(String eventsPath, String name, List<String> notes) async {
@@ -301,18 +307,21 @@ class AppState extends ChangeNotifier {
 
   /// The comparison card is built from the per-event files; fvg_conditions_summary.json
   /// is the study's own table, so any disagreement means the files come from different runs.
-  Future<void> _crossCheckSummary(String eventsPath, List<String> notes) async {
-    try {
-      final sum = await ConditionsSummary.loadNextTo(eventsPath);
-      if (sum == null || fakeEvents.isEmpty || controlEvents.isEmpty) return;
-      final bad = crossCheck(sum, events, fakeEvents, controlEvents);
-      if (bad.isNotEmpty) {
-        notes.add("${bad.length} buckets don't match fvg_conditions_summary.json (e.g. ${bad.first}). "
-            'The files may come from different runs. Re-run fvg_conditions.py and reload.');
-      }
-    } catch (e) {
-      notes.add("fvg_conditions_summary.json couldn't be read ($e).");
-    }
+  /// Runs in the background (it takes a couple of seconds) and only speaks up on a mismatch.
+  void _crossCheckSummary(String path) {
+    Isolate.run(() => crossCheckFiles(path)).then((bad) {
+      if (bad == null || bad.isEmpty || eventsPath != path) return;
+      notice = [
+        ?notice,
+        "${bad.length} buckets don't match fvg_conditions_summary.json (e.g. ${bad.first}). "
+            'The files may come from different runs. Re-run fvg_conditions.py and reload.',
+      ].join(' ');
+      notifyListeners();
+    }, onError: (Object e) {
+      if (eventsPath != path) return;
+      notice = "fvg_conditions_summary.json couldn't be checked ($e).";
+      notifyListeners();
+    });
   }
 
   Future<DateTime?> _readHoldout(String eventsPath) async {
@@ -461,39 +470,51 @@ class AppState extends ChangeNotifier {
   }
 
   // ── filters / stats / zones ─────────────────────────────────────────
-  bool _matchFilters(FvgEvent e) {
+  /// The active filters as one test, resolved once per change (it runs over ~170k events).
+  bool Function(FvgEvent) _filterTest() {
     int f(String k) => filters[k]!;
-    if (f('Scenario') > 0 && e.scenario != kScenarioCodes[f('Scenario') - 1]) return false;
-    if (f('Direction') > 0 && e.isBull != (f('Direction') == 1)) return false;
-    if (f('Gap size') > 0 && e.sizeQ != kFilterOptions['Gap size']![f('Gap size')]) return false;
-    if (f('Displacement') > 0 && e.dispQ != kDispBuckets[f('Displacement') - 1]) return false;
-    if (f('Formation session') > 0 && e.session != kSessions[f('Formation session') - 1]) return false;
-    if (f('Touch session') > 0 && e.touchSession != kSessions[f('Touch session') - 1]) return false;
-    if (f('HTF trend') > 0 && e.htfTrend != (f('HTF trend') == 1 ? 'Aligned' : 'Against')) return false;
-    if (f('Age') > 0 && e.ageBucket != kAgeBuckets[f('Age') - 1]) return false;
-    if (f('Sweep') > 0 && e.sweep != (f('Sweep') == 1)) return false;
-    if (f('Period') > 0 && e.period.index != f('Period') - 1) return false;
-    return true;
+    final sc = f('Scenario'), dir = f('Direction'), sz = f('Gap size'), disp = f('Displacement');
+    final fs = f('Formation session'), tsn = f('Touch session'), tr = f('HTF trend'), age = f('Age');
+    final sw = f('Sweep'), per = f('Period');
+    final scenario = sc > 0 ? kScenarioCodes[sc - 1] : null, size = sz > 0 ? kFilterOptions['Gap size']![sz] : null;
+    final dispQ = disp > 0 ? kDispBuckets[disp - 1] : null, ageB = age > 0 ? kAgeBuckets[age - 1] : null;
+    final form = fs > 0 ? kSessions[fs - 1] : null, touch = tsn > 0 ? kSessions[tsn - 1] : null;
+    final trend = tr > 0 ? (tr == 1 ? 'Aligned' : 'Against') : null;
+    return (e) {
+      if (scenario != null && e.scenario != scenario) return false;
+      if (dir > 0 && e.isBull != (dir == 1)) return false;
+      if (size != null && e.sizeQ != size) return false;
+      if (dispQ != null && e.dispQ != dispQ) return false;
+      if (form != null && e.session != form) return false;
+      if (touch != null && e.touchSession != touch) return false;
+      if (trend != null && e.htfTrend != trend) return false;
+      if (ageB != null && e.ageBucket != ageB) return false;
+      if (sw > 0 && e.sweep != (sw == 1)) return false;
+      if (per > 0 && e.period.index != per - 1) return false;
+      return true;
+    };
   }
 
-  bool _match(FvgEvent e) => _matchFilters(e) && (!starredOnly || bookmarks.starred(e.id));
-
   void _applyFilters() {
-    filtered = events.where(_match).toList();
+    if (!identical(_ctrlSplitOf, controlEvents)) {
+      _ctrlSplitOf = controlEvents;
+      _ctrlSplit = (controlEvents.where((e) => e.kind == 'real').toList(), controlEvents.where((e) => e.kind == 'fake').toList());
+    }
+    final match = _filterTest(), starred = starredOnly;
+    filtered = events.where((e) => match(e) && (!starred || bookmarks.starred(e.id))).toList();
     final locked = holdoutLocked;
     bool open(FvgEvent e) => !(locked && e.isHoldout);
     holdoutExcluded = locked ? filtered.where((e) => e.isHoldout).length : 0;
     final real = filtered.where(open).toList();
     stats = computeStats(real);
-    final fake = fakeEvents.where((e) => _matchFilters(e) && open(e)).toList();
-    final ctrl = controlEvents.where((e) => _matchFilters(e) && open(e)).toList();
+    final fake = fakeEvents.where((e) => match(e) && open(e)).toList();
     final hasCtrl = controlEvents.isNotEmpty;
-    fakeCurve = fakeEvents.isEmpty ? null : computeStats(fake).curve;
+    fakeCurve = fakeEvents.isEmpty ? null : depthCurve(fake).curve;
     comparison = Comparison(
       rateOf(real),
       fakeEvents.isEmpty ? null : rateOf(fake),
-      hasCtrl ? rateOf(ctrl.where((e) => e.kind == 'real')) : null,
-      hasCtrl ? rateOf(ctrl.where((e) => e.kind == 'fake')) : null,
+      hasCtrl ? rateOf(_controlReal.where((e) => match(e) && open(e))) : null,
+      hasCtrl ? rateOf(_controlFake.where((e) => match(e) && open(e))) : null,
     );
     _rebuildZones();
   }
