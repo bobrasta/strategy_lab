@@ -10,7 +10,7 @@ import 'theme.dart';
 /// 4 replay predict · 5 empty (default; load your own files).
 void main() {
   const preset = int.fromEnvironment('PRESET', defaultValue: 5);
-  runApp(FvgLabApp(state: AppState()..applyPreset(preset)));
+  runApp(FvgLabApp(state: AppState()..applyPreset(preset)..restorePrefs()));
 }
 
 class FvgLabApp extends StatefulWidget {

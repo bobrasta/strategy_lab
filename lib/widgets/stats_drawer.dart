@@ -138,7 +138,7 @@ class _ComparisonCard extends StatelessWidget {
         Verdict.candidate => ('Candidate', C.green),
         Verdict.artifact => ('Artifact', C.red),
         Verdict.noEdge => ('No edge', C.mute),
-        Verdict.needsData => (c.fake == null || c.control == null ? 'Needs fake + control files' : 'Too few events', C.mute),
+        Verdict.needsData => (c.fake == null || !c.hasControl ? 'Needs fake + control files' : 'Too few events', C.mute),
       };
 
   @override
@@ -150,18 +150,19 @@ class _ComparisonCard extends StatelessWidget {
     String diff(double? pp, double? z) => pp == null ? '—' : '${fmtSigned(pp, digits: 1)} pp${z == null ? '' : ' · z ${z.toStringAsFixed(1)}'}';
     final period = kFilterOptions['Period']![s.filters['Period']!];
 
-    Widget col(String label, RateSummary? r, Color color) => Expanded(
+    Widget col(String label, String value, String sub, Color color) => Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: ts(11, color: C.mute)),
             const SizedBox(height: 4),
             Builder(builder: (_) {
-              final parts = splitDecimal(rate(r));
+              final parts = splitDecimal(value);
               return BigNumber(parts.$1, parts.$2, size: 22, color: color);
             }),
             const SizedBox(height: 2),
-            Text(n(r), style: ts(11, color: C.mute)),
+            Text(sub, style: ts(11, color: C.mute)),
           ]),
         );
+    final ctrlPp = c.controlDiffPp;
 
     Widget row(String k, String v2, {bool strong = false}) => Padding(
           padding: const EdgeInsets.only(top: 6),
@@ -194,18 +195,19 @@ class _ComparisonCard extends StatelessWidget {
         Text(s.anyFilter ? 'Active filter · $period period' : 'All events · $period period', style: ts(11, color: C.mute)),
         const SizedBox(height: 12),
         Row(children: [
-          col('Real', c.real, C.text),
-          col('Fake', c.fake, C.mute),
-          col('Control', c.control, C.mute),
+          col('Real', rate(c.real), n(c.real), C.text),
+          col('Fake', rate(c.fake), n(c.fake), C.mute),
+          // The control run is real vs fake again on shuffled bars, so its number is a difference.
+          col('Control run', ctrlPp == null ? '—' : '${fmtSigned(ctrlPp, digits: 1)} pp', c.hasControl ? 'real − fake' : 'not loaded', C.mute),
         ]),
         const SizedBox(height: 8),
         row('Real − fake', diff(c.realMinusFakePp, c.zRealFake), strong: true),
-        row('Control − fake', diff(c.controlMinusFakePp, c.zControlFake)),
-        row('Real − control', diff(c.realMinusControlPp, c.zRealControl)),
+        row('Control run real − fake', diff(c.controlDiffPp, c.zControl)),
+        row('Edge beyond control', diff(c.edgeOverControlPp, null)),
         const SizedBox(height: 8),
         Text(
-          'Candidate: real beats fake and control (z ≥ 2 each). Artifact: real beats fake but matches control. '
-          'Rates exclude timeouts; min $kMinVerdictN resolved per group.',
+          'Candidate: real beats fake (z ≥ 2) and the shuffled-bars control run doesn\'t (z < 2). '
+          'Artifact: the control run shows the same edge. Rates exclude timeouts; min $kMinVerdictN resolved per group.',
           style: ts(10.5, color: C.mute, height: 1.4),
         ),
       ]),

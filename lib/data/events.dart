@@ -82,12 +82,22 @@ String? normalizeTrend(String raw) {
 }
 
 bool? parseBool(String raw) => switch (raw.trim().toLowerCase()) {
-      'yes' || 'true' || '1' || 'y' => true,
-      'no' || 'false' || '0' || 'n' => false,
+      'yes' || 'true' || '1' || 'y' || 'after sweep' => true,
+      'no' || 'false' || '0' || 'n' || 'no sweep' => false,
       _ => null,
     };
 
 const kAgeBuckets = ['1–3', '4–12', '13–48', '49+'];
+
+/// Python's age_b labels ("1-3 bars", "4-12", "13-48", "49+") → [kAgeBuckets].
+String? normalizeAge(String raw) {
+  final s = raw.trim().replaceAll('–', '-');
+  for (var i = 0; i < kAgeBuckets.length; i++) {
+    final k = kAgeBuckets[i].replaceAll('–', '-');
+    if (s == k || s.startsWith('$k ')) return kAgeBuckets[i];
+  }
+  return null;
+}
 
 enum Period { inSample, outOfSample, holdout }
 
@@ -96,6 +106,14 @@ Period periodOf(int ms) {
   final y = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).year;
   return y >= 2026 ? Period.holdout : (y >= 2024 ? Period.outOfSample : Period.inSample);
 }
+
+/// The study's `period` column: "in" / "out" / "holdout".
+Period? parsePeriod(String raw) => switch (raw.trim().toLowerCase().replaceAll('-', '').replaceAll('_', '')) {
+      'in' || 'insample' => Period.inSample,
+      'out' || 'outofsample' => Period.outOfSample,
+      'holdout' => Period.holdout,
+      _ => null,
+    };
 
 String periodLabel(Period p) => switch (p) {
       Period.inSample => 'In-sample',
@@ -128,7 +146,9 @@ class FvgEvent {
     this.dispQ,
     this.htfTrend,
     this.sweep,
-  });
+    Period? period,
+    this.kind,
+  }) : period = period ?? periodOf(formationMs);
 
   final String time, touchTime, endTime;
   final int formationMs, touchMs, endMs;
@@ -145,7 +165,11 @@ class FvgEvent {
   final String? touchSession, dispQ, htfTrend;
   final bool? sweep;
 
-  late final Period period = periodOf(formationMs);
+  /// From the study's `period` column when present, else from the formation year.
+  final Period period;
+
+  /// fvg_control_events.csv only: "real" or "fake" row of the shuffled-bars control run.
+  final String? kind;
   bool get isHoldout => period == Period.holdout;
   String? get ageBucket => age < 0
       ? null

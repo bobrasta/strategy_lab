@@ -10,9 +10,11 @@ import 'package:flutter/foundation.dart';
 import '../data/baseline.dart';
 import '../data/bookmarks.dart';
 import '../data/candles.dart';
+import '../data/conditions_summary.dart';
 import '../data/events.dart';
 import '../data/loaders.dart';
 import '../data/predictions.dart';
+import '../data/prefs.dart';
 import '../data/resample.dart';
 import '../data/sample_data.dart';
 import '../data/stats.dart';
@@ -86,7 +88,7 @@ class AppState extends ChangeNotifier {
   /// Companion outputs from the study, matched by the same filters.
   List<FvgEvent> fakeEvents = const [], controlEvents = const [];
   Set<String> eventColumns = const {};
-  Comparison comparison = const Comparison(RateSummary(0, 0, 0), null, null);
+  Comparison comparison = const Comparison(RateSummary(0, 0, 0), null, null, null);
   List<double?>? fakeCurve;
 
   /// Hold-out (2026) stats stay hidden until revealed; the reveal date is recorded.
@@ -177,6 +179,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Restores the last folder used in a file dialog (path_provider).
+  Future<void> restorePrefs() async {
+    lastDir ??= await Prefs.lastDir();
+  }
+
+  void _rememberDir(String filePath) {
+    lastDir = File(filePath).parent.path;
+    Prefs.setLastDir(lastDir!);
+  }
+
   Future<void> pickCandles() async {
     final f = await openFile(acceptedTypeGroups: [_csv], initialDirectory: lastDir, confirmButtonText: 'Load candles');
     if (f != null) await loadCandles(f.path);
@@ -211,7 +223,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> loadCandles(String path) async {
-    lastDir = File(path).parent.path;
+    _rememberDir(path);
     final c = await _busy('Loading candles…', () => _parseCandlesIso(path));
     if (c == null) return;
     _clearSample();
@@ -228,7 +240,16 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> loadEvents(String path) async {
-    lastDir = File(path).parent.path;
+    _rememberDir(path);
+    final notes = <String>[];
+    // fvg_events_app.csv is fvg_events.csv plus the condition columns; prefer it when it sits alongside.
+    if (path.split(RegExp(r'[\\/]')).last == 'fvg_events.csv') {
+      final app = siblingPath(path, 'fvg_events_app.csv');
+      if (await File(app).exists()) {
+        path = app;
+        notes.add('Loaded fvg_events_app.csv from the same folder (fvg_events.csv plus the condition columns).');
+      }
+    }
     final r = await _busy('Loading events…', () => _parseEventsIso(path, false));
     if (r == null) return;
     _clearSample();
@@ -239,11 +260,10 @@ class AppState extends ChangeNotifier {
       ..addEntries(events.map((e) => MapEntry(e.id, e)));
     eventsPath = path;
     selected = null;
-    final notes = <String>[];
     if (r.skipped > 0) notes.add("${fmtInt(r.skipped)} rows in fvg_events.csv couldn't be read and were skipped.");
     try {
+      // Only a fallback for the faint fake-zone curve when fvg_fake_events.csv is missing.
       baseline = await loadBaselineNextTo(path);
-      if (baseline == null) notes.add('No fvg_baseline_summary.json next to the events file, so the baseline card is off.');
     } catch (e) {
       baseline = null;
       notes.add("fvg_baseline_summary.json couldn't be read ($e).");
@@ -251,6 +271,11 @@ class AppState extends ChangeNotifier {
     bookmarks = await BookmarkStore.load(siblingPath(path, 'fvg_bookmarks.json'));
     fakeEvents = await _loadCompanion(path, 'fvg_fake_events.csv', notes);
     controlEvents = await _loadCompanion(path, 'fvg_control_events.csv', notes);
+    if (controlEvents.any((e) => e.kind != 'real' && e.kind != 'fake')) {
+      notes.add('fvg_control_events.csv needs a kind column (real / fake). Re-run fvg_conditions.py.');
+      controlEvents = const [];
+    }
+    await _crossCheckSummary(path, notes);
     holdoutRevealedAt = await _readHoldout(path);
     final missingCols = _filterColumn.entries.where((e) => !eventColumns.contains(e.value)).map((e) => e.key).toList();
     if (missingCols.isNotEmpty) notes.add('No ${missingCols.join(', ')} column in fvg_events.csv, so those filters are off.');
@@ -272,6 +297,22 @@ class AppState extends ChangeNotifier {
       notes.add("$name couldn't be read ($e).");
     }
     return const [];
+  }
+
+  /// The comparison card is built from the per-event files; fvg_conditions_summary.json
+  /// is the study's own table, so any disagreement means the files come from different runs.
+  Future<void> _crossCheckSummary(String eventsPath, List<String> notes) async {
+    try {
+      final sum = await ConditionsSummary.loadNextTo(eventsPath);
+      if (sum == null || fakeEvents.isEmpty || controlEvents.isEmpty) return;
+      final bad = crossCheck(sum, events, fakeEvents, controlEvents);
+      if (bad.isNotEmpty) {
+        notes.add("${bad.length} buckets don't match fvg_conditions_summary.json (e.g. ${bad.first}). "
+            'The files may come from different runs. Re-run fvg_conditions.py and reload.');
+      }
+    } catch (e) {
+      notes.add("fvg_conditions_summary.json couldn't be read ($e).");
+    }
   }
 
   Future<DateTime?> _readHoldout(String eventsPath) async {
@@ -446,8 +487,14 @@ class AppState extends ChangeNotifier {
     stats = computeStats(real);
     final fake = fakeEvents.where((e) => _matchFilters(e) && open(e)).toList();
     final ctrl = controlEvents.where((e) => _matchFilters(e) && open(e)).toList();
+    final hasCtrl = controlEvents.isNotEmpty;
     fakeCurve = fakeEvents.isEmpty ? null : computeStats(fake).curve;
-    comparison = Comparison(rateOf(real), fakeEvents.isEmpty ? null : rateOf(fake), controlEvents.isEmpty ? null : rateOf(ctrl));
+    comparison = Comparison(
+      rateOf(real),
+      fakeEvents.isEmpty ? null : rateOf(fake),
+      hasCtrl ? rateOf(ctrl.where((e) => e.kind == 'real')) : null,
+      hasCtrl ? rateOf(ctrl.where((e) => e.kind == 'fake')) : null,
+    );
     _rebuildZones();
   }
 
@@ -864,7 +911,7 @@ class AppState extends ChangeNotifier {
     if (loc == null) return;
     try {
       await File(loc.path).writeAsString(predictionsCsv(predictionLog));
-      lastDir = File(loc.path).parent.path;
+      _rememberDir(loc.path);
       notice = 'Saved ${fmtInt(predictionLog.length)} predictions to ${loc.path}.';
     } catch (e) {
       error = "Couldn't write the predictions file: $e";

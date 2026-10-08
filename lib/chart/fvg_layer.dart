@@ -25,6 +25,13 @@ class FvgLayer extends ChartLayer {
         EvOutcome.timeout => C.mute,
       };
 
+  /// A zone's outcome is knowable only once the cursor has reached its resolution bar
+  /// (and, while the hold-out is locked, never for hold-out events outside replay).
+  static bool outcomeKnown(Zone z, LayerContext ctx) => ctx.cursor >= z.end && !ctx.state.outcomeHidden(z.ev);
+
+  /// Grey until [outcomeKnown], then the outcome colour.
+  static Color zoneColor(Zone z, LayerContext ctx) => outcomeKnown(z, ctx) ? outcomeColor(z.ev.outcome) : C.mute;
+
   Iterable<(Zone, double, double, int)> _visible(ChartGeometry g, LayerContext ctx) sync* {
     final cur = ctx.cursor;
     for (final z in ctx.state.zones) {
@@ -38,9 +45,9 @@ class FvgLayer extends ChartLayer {
 
   @override
   void paintBelow(Canvas canvas, ChartGeometry g, LayerContext ctx) {
-    final s = ctx.state, cur = ctx.cursor, levels = s.layersOn.contains('levels');
+    final s = ctx.state, levels = s.layersOn.contains('levels');
     for (final (z, x0, x1, _) in _visible(g, ctx)) {
-      final ev = z.ev, known = cur >= z.end && !s.outcomeHidden(ev), col = known ? outcomeColor(ev.outcome) : C.mute;
+      final ev = z.ev, known = outcomeKnown(z, ctx), col = zoneColor(z, ctx);
       final sel = s.selected == ev.id || s.pending == ev.id;
       final r = Rect.fromLTRB(x0, g.y(ev.top), x1, g.y(ev.bottom));
       canvas.drawRect(r, Paint()..color = col.withOpacity(known ? 0.14 : 0.10));
@@ -70,7 +77,7 @@ class FvgLayer extends ChartLayer {
   void paintAbove(Canvas canvas, ChartGeometry g, LayerContext ctx) {
     final s = ctx.state, cur = ctx.cursor, labels = s.layersOn.contains('labels');
     for (final (z, _, x1, end) in _visible(g, ctx)) {
-      final ev = z.ev, known = cur >= z.end && !s.outcomeHidden(ev), col = known ? outcomeColor(ev.outcome) : C.mute;
+      final ev = z.ev, known = outcomeKnown(z, ctx), col = zoneColor(z, ctx);
       final sel = s.selected == ev.id || s.pending == ev.id;
       final yT = g.y(ev.top), yB = g.y(ev.bottom);
       final touched = cur >= z.touch;

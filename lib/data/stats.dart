@@ -33,33 +33,40 @@ enum Verdict { candidate, artifact, noEdge, needsData }
 const kMinVerdictN = 30;
 const kZ = 2.0;
 
-/// Real vs fake (random zones) vs control, for the active filter and period.
-/// Candidate: real beats fake AND control (z ≥ 2 each).
-/// Artifact: real beats fake but real ≈ control (|z| < 2).
-/// No edge: real doesn't beat fake (or loses to control).
+/// Real vs fake (random zones) for the active filter and period, checked against the
+/// control run (the same procedure on shuffled bars), as in fvg_conditions.py.
+/// Candidate: real beats fake (z ≥ 2) and the control run doesn't (z < 2).
+/// Artifact: the control run shows the same edge (z ≥ 2), so it comes from the method.
+/// No edge: real doesn't beat fake.
 class Comparison {
-  const Comparison(this.real, this.fake, this.control);
+  const Comparison(this.real, this.fake, this.controlReal, this.controlFake);
   final RateSummary real;
-  final RateSummary? fake, control;
+  final RateSummary? fake, controlReal, controlFake;
 
   double? _pp(RateSummary? a, RateSummary? b) => a?.rate == null || b?.rate == null ? null : (a!.rate! - b!.rate!) * 100;
+  bool get hasControl => controlReal != null && controlFake != null;
   double? get realMinusFakePp => _pp(real, fake);
-  double? get controlMinusFakePp => _pp(control, fake);
-  double? get realMinusControlPp => _pp(real, control);
+
+  /// Real − fake of the control run in the same bucket.
+  double? get controlDiffPp => _pp(controlReal, controlFake);
+
+  /// How much more the real market's edge is than the control run's.
+  double? get edgeOverControlPp {
+    final a = realMinusFakePp, b = controlDiffPp;
+    return a == null || b == null ? null : a - b;
+  }
+
   double? get zRealFake => fake == null ? null : zTwoProp(real, fake!);
-  double? get zControlFake => fake == null || control == null ? null : zTwoProp(control!, fake!);
-  double? get zRealControl => control == null ? null : zTwoProp(real, control!);
+  double? get zControl => hasControl ? zTwoProp(controlReal!, controlFake!) : null;
 
   Verdict get verdict {
-    final f = fake, c = control;
-    if (f == null || c == null || real.resolved < kMinVerdictN || f.resolved < kMinVerdictN || c.resolved < kMinVerdictN) {
-      return Verdict.needsData;
-    }
-    final zrf = zRealFake, zrc = zRealControl;
-    if (zrf == null || zrf < kZ) return Verdict.noEdge;
-    if (zrc != null && zrc >= kZ) return Verdict.candidate;
-    if (zrc == null || zrc.abs() < kZ) return Verdict.artifact;
-    return Verdict.noEdge;
+    final f = fake, cr = controlReal, cf = controlFake;
+    if (f == null || cr == null || cf == null) return Verdict.needsData;
+    if ([real, f, cr, cf].any((r) => r.resolved < kMinVerdictN)) return Verdict.needsData;
+    final zrf = zRealFake, zc = zControl;
+    if (zrf == null || zc == null) return Verdict.needsData;
+    if (zrf < kZ) return Verdict.noEdge;
+    return zc >= kZ ? Verdict.artifact : Verdict.candidate;
   }
 }
 

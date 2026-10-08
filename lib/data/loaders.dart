@@ -125,6 +125,8 @@ Candles parseCandlesFile(String path) {
 /// Runs inside an isolate. [companion] files (fvg_fake_events.csv,
 /// fvg_control_events.csv) only need time, dir and outcome; the condition
 /// columns are used when present so the same filters apply to them.
+/// Column names from fvg_conditions.py (form_session, trend, sweep_b, period)
+/// are accepted alongside the design's names.
 EventsParse parseEventsFile(String path, {bool companion = false}) {
   final name = path.split(RegExp(r'[\\/]')).last;
   final text = _readCsv(path, companion ? 'Expected $name from the study output.' : 'Pick fvg_events.csv from the study output.');
@@ -150,11 +152,12 @@ EventsParse parseEventsFile(String path, {bool companion = false}) {
     return null;
   }
 
-  final iSession = any(const ['formation_session', 'session']);
+  final iSession = any(const ['formation_session', 'form_session', 'session']);
   final iTouchSession = any(const ['touch_session']);
   final iDisp = any(const ['disp_q', 'displacement', 'disp_bucket']);
   final iTrend = any(const ['htf_trend', 'trend']);
-  final iSweep = any(const ['sweep', 'swept']);
+  final iSweep = any(const ['sweep', 'sweep_b', 'swept']);
+  final iPeriod = any(const ['period']), iKind = any(const ['kind']);
   final columns = <String>{
     ...head,
     if (iDisp != null) 'disp_q',
@@ -210,6 +213,8 @@ EventsParse parseEventsFile(String path, {bool companion = false}) {
       dispQ: normalizeDisp(at(iDisp)),
       htfTrend: normalizeTrend(at(iTrend)),
       sweep: parseBool(at(iSweep)),
+      period: parsePeriod(at(iPeriod)),
+      kind: iKind == null ? null : at(iKind).toLowerCase(),
     ));
   }
   if (out.isEmpty) throw LoadError('No events could be read from $name.');
