@@ -64,7 +64,24 @@ void main() {
     final sum = (await ConditionsSummary.loadNextTo(fx('fvg_events.csv')))!;
     expect(sum.rows.length, greaterThan(40));
     expect(crossCheck(sum, s.events, s.fakeEvents, s.controlEvents), isEmpty);
+    // The app runs the same check in a background isolate on load.
+    await s.crossCheckDone;
     expect(s.notice ?? '', isNot(contains("don't match")));
+    expect(s.notice ?? '', isNot(contains("couldn't be checked")));
+  }, skip: skip);
+
+  test('a summary JSON from a different run is flagged on load', () async {
+    final dir = Directory.systemTemp.createTempSync('fvg_lab_stale_');
+    for (final f in ['fvg_events_app.csv', 'fvg_fake_events.csv', 'fvg_control_events.csv']) {
+      File(fx(f)).copySync('${dir.path}/$f');
+    }
+    final j = jsonDecode(File(fx('fvg_conditions_summary.json')).readAsStringSync()) as Map<String, dynamic>;
+    (j['periods']['in'] as List).first['n_real'] = 1;
+    File('${dir.path}/fvg_conditions_summary.json').writeAsStringSync(jsonEncode(j));
+    final t = AppState();
+    await t.loadEvents('${dir.path}/fvg_events_app.csv');
+    await t.crossCheckDone;
+    expect(t.notice, contains("1 buckets don't match fvg_conditions_summary.json (e.g. In-sample all=all)"));
   }, skip: skip);
 
   test('hold-out is locked by default and nothing is 2026 yet', () {

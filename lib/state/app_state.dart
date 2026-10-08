@@ -66,6 +66,7 @@ final _csv = XTypeGroup(label: 'CSV', extensions: const ['csv']);
 Future<Candles> _parseCandlesIso(String path) => Isolate.run(() => parseCandlesFile(path));
 Future<EventsParse> _parseEventsIso(String path, bool companion) => Isolate.run(() => parseEventsFile(path, companion: companion));
 Future<Candles> _resampleIso(Candles src, int minutes) => Isolate.run(() => resample(src, minutes));
+Future<List<String>?> _crossCheckIso(String path) => Isolate.run(() => crossCheckFiles(path));
 
 class AppState extends ChangeNotifier {
   // ── data ────────────────────────────────────────────────────────────
@@ -87,6 +88,9 @@ class AppState extends ChangeNotifier {
 
   /// Companion outputs from the study, matched by the same filters.
   List<FvgEvent> fakeEvents = const [], controlEvents = const [];
+
+  /// Completes when the background check against fvg_conditions_summary.json is done.
+  Future<void>? crossCheckDone;
 
   /// [controlEvents] split by kind once at load.
   List<FvgEvent> get _controlReal => _ctrlSplit.$1;
@@ -309,7 +313,7 @@ class AppState extends ChangeNotifier {
   /// is the study's own table, so any disagreement means the files come from different runs.
   /// Runs in the background (it takes a couple of seconds) and only speaks up on a mismatch.
   void _crossCheckSummary(String path) {
-    Isolate.run(() => crossCheckFiles(path)).then((bad) {
+    crossCheckDone = _crossCheckIso(path).then((bad) {
       if (bad == null || bad.isEmpty || eventsPath != path) return;
       notice = [
         ?notice,
