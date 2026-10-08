@@ -12,6 +12,10 @@ flutter create --platforms=linux .     # generates linux/ runner once
 flutter pub get
 flutter run -d linux                   # opens empty: load your files
 flutter run -d linux --dart-define=PRESET=3   # demo on bundled sample: 1 explore · 2 drawers · 3 replay · 4 predict
+flutter run -d linux \
+  --dart-define=CANDLES=/home/bob/Documents/fxdata/xauusd_m15_2021-01-01_2026-01-01.csv \
+  --dart-define=EVENTS=/home/bob/Documents/fxdata/fvg_events.csv   # open files at startup
+flutter test                                  # real-data tests read FXDATA_DIR (default ~/Documents/fxdata), skip if absent
 ```
 
 Window size: in `linux/runner/my_application.cc` set
@@ -24,9 +28,12 @@ Font: put the Geist TTFs in `assets/fonts/` and uncomment `fonts:` in `pubspec.y
 | File | How |
 |---|---|
 | Candles CSV `time,open,high,low,close,volume` (UTC) | Load candles. Any timeframe; M1 enables resampling and drill-down |
-| `fvg_events.csv` | Load events. One row per first touch, times matched to candles **by exact string** |
-| `fvg_baseline_summary.json` | Auto-loaded from the events folder if present (faint curve fallback) |
-| `fvg_fake_events.csv`, `fvg_control_events.csv` | Auto-loaded from the events folder. Need `time,dir,outcome`; condition columns let the same filters apply |
+| `fvg_events.csv` | Load events. One row per first touch, times matched to candles **by exact string**. If `fvg_events_app.csv` sits next to it, that is loaded instead |
+| `fvg_events_app.csv` | `fvg_events.csv` + `disp_q, trend, age_b, form_session, touch_session, sweep_b, period` (from `fvg_conditions.py`) |
+| `fvg_fake_events.csv` | Auto-loaded. Size-matched fake zones (`fvg_conditions.py`), same condition columns |
+| `fvg_control_events.csv` | Auto-loaded. The shuffled-bars control run, real and fake rows (`kind`) |
+| `fvg_conditions_summary.json` | Auto-loaded. The study's own per-bucket table; the app cross-checks its numbers against it on load |
+| `fvg_baseline_summary.json` | Optional fallback for the faint fake-zone curve when there's no fake events file |
 | `fvg_holdout.json` | Written when you reveal the 2026 hold-out (date + filters at reveal) |
 | `fvg_bookmarks.json` | Auto-loaded/saved next to the events file (stars + notes, key `time|dir`) |
 
@@ -75,15 +82,18 @@ the events-timeframe candle boundaries.
 
 ## Conditional study
 
-Optional `fvg_events.csv` columns (filters turn off if absent): `disp_q` (D1 weak … D4 strong),
-`formation_session`/`session`, `touch_session` (derived from touch hour if missing), `htf_trend`
-(aligned/against), `sweep` (yes/no). Age buckets come from `age`; Period from formation year
-(2021–23 in-sample, 2024–25 out-of-sample, 2026 hold-out).
+Optional events columns (filters turn off if absent): `disp_q` (D1 weak … D4 strong),
+`form_session`/`formation_session`/`session`, `touch_session` (derived from touch hour if missing),
+`trend`/`htf_trend` (aligned/against), `sweep_b`/`sweep` (after sweep/no sweep, yes/no). Age buckets come
+from `age`; Period from the `period` column, else formation year (2021–23 in-sample, 2024–25
+out-of-sample, 2026 hold-out).
 
-**Real vs fake vs control** card: bounce rates (timeouts excluded) of real, fake and control events
-under the active filter and period, with pooled two-proportion z. Verdict: *Candidate* = real beats fake
-and control (z ≥ 2 each); *Artifact* = real beats fake but |z| < 2 vs control; *No edge* otherwise; needs
-≥ 30 resolved per group.
+**Real vs fake vs control** card: bounce rates (timeouts excluded) of real and fake events under the
+active filter and period, and the control run's own real − fake (same procedure on shuffled bars), with
+pooled two-proportion z, exactly as `fvg_conditions.py`. Verdict: *Candidate* = real beats fake (z ≥ 2)
+and the control run doesn't (z < 2); *Artifact* = the control run shows it too (z ≥ 2); *No edge* = real
+doesn't beat fake; needs ≥ 30 resolved per group. Any bucket in `fvg_conditions_summary.json` that the
+app computes differently raises a notice (files from different runs).
 
 **Hold-out** is locked by default: excluded from all stats and hidden in Explore (chart, table, detail).
 Replay can still play hold-out bars. "Reveal hold-out" asks first and writes `fvg_holdout.json`.
