@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'baseline.dart' show siblingPath;
 import 'events.dart';
-import 'loaders.dart';
 import 'stats.dart';
 
 double? _d(Object? v) => v is num ? v.toDouble() : null;
@@ -140,31 +139,22 @@ Comparison? comparisonFor(SummaryRow r, List<FvgEvent> real, List<FvgEvent> fake
   );
 }
 
-/// Buckets where the app's numbers differ from the study's JSON (stale or mismatched files).
-List<String> crossCheck(ConditionsSummary s, List<FvgEvent> real, List<FvgEvent> fake, List<FvgEvent> control) {
-  final out = <String>[];
+/// Whether the app's numbers for one JSON bucket match the study's.
+bool rowMatches(SummaryRow r, List<FvgEvent> real, List<FvgEvent> fake, List<FvgEvent> control) {
+  final c = comparisonFor(r, real, fake, control);
+  if (c == null) return true; // a feature the app doesn't filter on
   bool near(double? a, double? b) => (a == null && b == null) || (a != null && b != null && (a - b).abs() < 1e-9);
-  for (final r in s.rows) {
-    final c = comparisonFor(r, real, fake, control);
-    if (c == null) continue;
-    final ok = c.real.resolved == r.nReal &&
-        c.fake!.resolved == r.nFake &&
-        c.controlReal!.resolved == r.nControlReal &&
-        c.controlFake!.resolved == r.nControlFake &&
-        near(c.real.rate, r.real) &&
-        near(c.fake!.rate, r.fake) &&
-        verdictCode(c.verdict) == r.verdict;
-    if (!ok) out.add('${periodLabel(r.period)} ${r.feature}=${r.bucket}');
-  }
-  return out;
+  return c.real.resolved == r.nReal &&
+      c.fake!.resolved == r.nFake &&
+      c.controlReal!.resolved == r.nControlReal &&
+      c.controlFake!.resolved == r.nControlFake &&
+      near(c.real.rate, r.real) &&
+      near(c.fake!.rate, r.fake) &&
+      verdictCode(c.verdict) == r.verdict;
 }
 
-/// [crossCheck] from files only, so it can run in a background isolate.
-/// Null when the JSON or a companion file is missing.
-Future<List<String>?> crossCheckFiles(String eventsPath) async {
-  final sum = await ConditionsSummary.loadNextTo(eventsPath);
-  final fake = siblingPath(eventsPath, 'fvg_fake_events.csv'), ctrl = siblingPath(eventsPath, 'fvg_control_events.csv');
-  if (sum == null || !File(fake).existsSync() || !File(ctrl).existsSync()) return null;
-  return crossCheck(sum, parseEventsFile(eventsPath).events, parseEventsFile(fake, companion: true).events,
-      parseEventsFile(ctrl, companion: true).events);
-}
+String rowLabel(SummaryRow r) => '${periodLabel(r.period)} ${r.feature}=${r.bucket}';
+
+/// Buckets where the app's numbers differ from the study's JSON (stale or mismatched files).
+List<String> crossCheck(ConditionsSummary s, List<FvgEvent> real, List<FvgEvent> fake, List<FvgEvent> control) =>
+    [for (final r in s.rows) if (!rowMatches(r, real, fake, control)) rowLabel(r)];

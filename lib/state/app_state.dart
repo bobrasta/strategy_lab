@@ -66,7 +66,6 @@ final _csv = XTypeGroup(label: 'CSV', extensions: const ['csv']);
 Future<Candles> _parseCandlesIso(String path) => Isolate.run(() => parseCandlesFile(path));
 Future<EventsParse> _parseEventsIso(String path, bool companion) => Isolate.run(() => parseEventsFile(path, companion: companion));
 Future<Candles> _resampleIso(Candles src, int minutes) => Isolate.run(() => resample(src, minutes));
-Future<List<String>?> _crossCheckIso(String path) => Isolate.run(() => crossCheckFiles(path));
 
 class AppState extends ChangeNotifier {
   // ── data ────────────────────────────────────────────────────────────
@@ -311,21 +310,32 @@ class AppState extends ChangeNotifier {
 
   /// The comparison card is built from the per-event files; fvg_conditions_summary.json
   /// is the study's own table, so any disagreement means the files come from different runs.
-  /// Runs in the background (it takes a couple of seconds) and only speaks up on a mismatch.
+  /// Checked one bucket at a time, yielding in between so the UI never stalls,
+  /// and only speaks up on a mismatch.
   void _crossCheckSummary(String path) {
-    crossCheckDone = _crossCheckIso(path).then((bad) {
-      if (bad == null || bad.isEmpty || eventsPath != path) return;
-      notice = [
-        ?notice,
-        "${bad.length} buckets don't match fvg_conditions_summary.json (e.g. ${bad.first}). "
-            'The files may come from different runs. Re-run fvg_conditions.py and reload.',
-      ].join(' ');
+    crossCheckDone = () async {
+      final ev = events, fake = fakeEvents, ctrl = controlEvents;
+      try {
+        final sum = await ConditionsSummary.loadNextTo(path);
+        if (sum == null || fake.isEmpty || ctrl.isEmpty) return;
+        final bad = <String>[];
+        for (final r in sum.rows) {
+          if (eventsPath != path) return; // another file was loaded meanwhile
+          if (!rowMatches(r, ev, fake, ctrl)) bad.add(rowLabel(r));
+          await Future<void>.delayed(Duration.zero);
+        }
+        if (bad.isEmpty || eventsPath != path) return;
+        notice = [
+          ?notice,
+          "${bad.length} buckets don't match fvg_conditions_summary.json (e.g. ${bad.first}). "
+              'The files may come from different runs. Re-run fvg_conditions.py and reload.',
+        ].join(' ');
+      } catch (e) {
+        if (eventsPath != path) return;
+        notice = "fvg_conditions_summary.json couldn't be checked ($e).";
+      }
       notifyListeners();
-    }, onError: (Object e) {
-      if (eventsPath != path) return;
-      notice = "fvg_conditions_summary.json couldn't be checked ($e).";
-      notifyListeners();
-    });
+    }();
   }
 
   Future<DateTime?> _readHoldout(String eventsPath) async {
