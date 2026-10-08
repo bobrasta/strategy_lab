@@ -53,13 +53,20 @@ class ChartGeometry {
       hi = lo + 2;
     }
     final pad = (hi - lo) * 0.08;
+    var vlo = lo - pad, vhi = hi + pad;
+    if (s.priceManual) {
+      // User scale/shift applied to the autoscaled range, so it still never reads past the cursor.
+      final range = vhi - vlo, mid = (vlo + vhi) / 2 + s.priceShift * range, half = range / 2 / s.priceZoom;
+      vlo = mid - half;
+      vhi = mid + half;
+    }
     final plotH = size.height - axisBottom;
     return ChartGeometry(
       size: size,
       viewStart: s.viewStart,
       zoom: s.zoom,
-      lo: lo - pad,
-      hi: hi + pad,
+      lo: vlo,
+      hi: vhi,
       top: 72,
       bottom: plotH - (s.isReplay ? 104 : 40),
       dockRight: dockRight,

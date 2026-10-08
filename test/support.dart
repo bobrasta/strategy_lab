@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
+
 /// The research folder. Override with FXDATA_DIR; tests that need it skip when it's missing.
 final String fxdataDir = Platform.environment['FXDATA_DIR'] ?? '/home/bob/Documents/fxdata';
 
@@ -36,3 +38,12 @@ String candlesCsv(int n, {DateTime? start, Map<int, List<double>> ohlc = const {
 }
 
 const eventsHeader = 'time,touch_time,end_time,edge,far,dir,gap_atr,age,max_wick,max_close,outcome,bars,scenario,size_q';
+
+/// Geist isn't bundled; on this machine the app falls back to Noto Sans, so widget tests measure with it.
+Future<void> loadFallbackFont() async {
+  const noto = '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf';
+  if (!File(noto).existsSync()) return;
+  for (final family in ['Geist', 'Noto Sans']) {
+    await (FontLoader(family)..addFont(Future.value(ByteData.sublistView(File(noto).readAsBytesSync())))).load();
+  }
+}

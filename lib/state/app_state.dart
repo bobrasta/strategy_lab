@@ -7,6 +7,7 @@ import 'dart:math';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
+import '../chart/chart_geometry.dart';
 import '../data/baseline.dart';
 import '../data/bookmarks.dart';
 import '../data/candles.dart';
@@ -119,6 +120,11 @@ class AppState extends ChangeNotifier {
   bool leftOpen = false, rightOpen = false, bottomOpen = false, focus = false, starredOnly = false;
   bool selectMode = false, jumpOpen = false, playing = false, predict = false;
   int zoom = 150, viewStart = 0, cursor = 0, replayStart = 0, speed = 2;
+
+  /// Manual price scale on top of autoscale (which only ever reads bars ≤ cursor):
+  /// [priceZoom] > 1 makes candles taller; [priceShift] moves the view, in autoscaled ranges.
+  double priceZoom = 1, priceShift = 0;
+  bool get priceManual => priceZoom != 1 || priceShift != 0;
 
   /// While awaiting a prediction: the hidden first-touch bar (only its open is drawn).
   int? peek;
@@ -472,6 +478,8 @@ class AppState extends ChangeNotifier {
   }
 
   void _resetView() {
+    priceZoom = 1;
+    priceShift = 0;
     zoom = min(150, max(40, n));
     viewStart = clampV(n - zoom);
     cursor = max(0, n - 1);
@@ -613,6 +621,38 @@ class AppState extends ChangeNotifier {
   void fit() => _set(() {
         zoom = max(40, n);
         viewStart = 0;
+        priceZoom = 1;
+        priceShift = 0;
+      });
+
+  /// Gestures don't zoom out past this many bars (painting a whole M1 file per frame is too slow);
+  /// Fit still shows everything.
+  static const kMaxGestureZoom = 5000;
+
+  /// Zooms by [f] (> 1 shows more bars) keeping the bar under [anchor]
+  /// (0 = left edge … 1 = right edge of the plot) in place. Returns false at a limit.
+  bool zoomAt(double f, double anchor) {
+    if (!loaded) return false;
+    final cap = max(40, min(n, max(kMaxGestureZoom, zoom)));
+    final next = (zoom * f).round().clamp(40, cap).toInt();
+    if (next == zoom) return false;
+    const pad = ChartGeometry.rightPadBars;
+    final bar = viewStart + anchor * (zoom + pad);
+    zoom = next;
+    viewStart = clampV((bar - anchor * (zoom + pad)).round());
+    notifyListeners();
+    return true;
+  }
+
+  /// Price-axis drag: > 1 makes candles taller.
+  void scalePrice(double f) => _set(() => priceZoom = (priceZoom * f).clamp(0.1, 20.0).toDouble());
+
+  /// Vertical chart drag, in autoscaled ranges.
+  void shiftPrice(double by) => _set(() => priceShift = (priceShift + by).clamp(-50.0, 50.0).toDouble());
+
+  void resetPriceScale() => _set(() {
+        priceZoom = 1;
+        priceShift = 0;
       });
   void pan(int d) => _set(() => viewStart = clampV(viewStart + d));
 

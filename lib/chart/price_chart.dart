@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/candles.dart';
 import '../data/events.dart';
@@ -25,6 +26,101 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
   ChartGeometry? _geo;
   AppState get s => widget.state;
 
+  // Gesture tuning. Flip the sign of [_zoomPerPx] if two-finger up/down feels inverted.
+  static const _zoomPerPx = 0.004; // trackpad: fingers up (negative dy) = zoom in
+  static const _wheelZoomPerPx = 0.0025; // mouse wheel: up = zoom in
+  static const _axisScalePerPx = 0.006; // price axis drag: up = taller candles
+
+  double _panAcc = 0, _zoomAcc = 1, _lastScale = 1;
+  Axis? _swipeAxis;
+  bool _dragAxis = false, _dragging = false, _overAxis = false;
+  DateTime _lastAxisTap = DateTime(2000);
+
+  bool _onAxis(Offset p) {
+    final g = _geo;
+    return g != null && p.dx >= g.axisX && p.dy <= g.plotH;
+  }
+
+  double _anchor(Offset p) {
+    final g = _geo;
+    return g == null || g.plotW <= 0 ? 1 : (p.dx / g.plotW).clamp(0.0, 1.0).toDouble();
+  }
+
+  /// Horizontal scroll in (fractional) bars; positive = later in time.
+  void _panBars(double bars) {
+    _panAcc += bars;
+    final whole = _panAcc.truncate();
+    if (whole == 0) return;
+    _panAcc -= whole;
+    s.pan(whole);
+  }
+
+  /// Zoom by [f] (> 1 = more bars), accumulated so slow trackpad motion still moves.
+  void _zoom(double f, Offset at) {
+    _zoomAcc *= f;
+    final target = (s.zoom * _zoomAcc).round();
+    if (target == s.zoom) return;
+    s.zoomAt(target / s.zoom, _anchor(at));
+    _zoomAcc = 1;
+  }
+
+  void _onScroll(PointerScrollEvent e) {
+    final g = _geo;
+    if (g == null || !s.loaded) return;
+    var dx = e.scrollDelta.dx, dy = e.scrollDelta.dy;
+    if (dx == 0 && HardwareKeyboard.instance.isShiftPressed) {
+      dx = dy;
+      dy = 0;
+    }
+    if (dx.abs() > dy.abs()) {
+      _panBars(dx / g.xs);
+    } else if (dy != 0) {
+      _zoom(exp(dy * _wheelZoomPerPx), e.localPosition);
+    }
+  }
+
+  void _onSwipeStart(PointerPanZoomStartEvent e) {
+    _swipeAxis = null;
+    _lastScale = 1;
+    _panAcc = 0;
+    _zoomAcc = 1;
+  }
+
+  /// Two-finger touchpad: up/down zooms, left/right scrolls (axis locked per gesture), pinch zooms.
+  void _onSwipe(PointerPanZoomUpdateEvent e) {
+    final g = _geo;
+    if (g == null || !s.loaded) return;
+    // Global pan values: the chart isn't rotated or scaled, and `localPan` is offset by the
+    // widget's position (transformed like a point), which broke the axis lock.
+    final d = e.panDelta, total = e.pan;
+    if (_swipeAxis == null && total.distance > 4) {
+      _swipeAxis = total.dx.abs() > total.dy.abs() ? Axis.horizontal : Axis.vertical;
+    }
+    if (_swipeAxis == Axis.horizontal) _panBars(-d.dx / g.xs);
+    if (_swipeAxis == Axis.vertical) _zoom(exp(d.dy * _zoomPerPx), e.localPosition);
+    if (e.scale > 0 && e.scale != _lastScale) {
+      _zoom(_lastScale / e.scale, e.localPosition);
+      _lastScale = e.scale;
+    }
+  }
+
+  void _onDragStart(DragStartDetails d) {
+    _dragAxis = _onAxis(d.localPosition);
+    _panAcc = 0;
+    setState(() => _dragging = true);
+  }
+
+  void _onDrag(DragUpdateDetails d) {
+    final g = _geo;
+    if (g == null || !s.loaded) return;
+    if (_dragAxis) {
+      s.scalePrice(exp(-d.delta.dy * _axisScalePerPx));
+      return;
+    }
+    _panBars(-d.delta.dx / g.xs);
+    if (d.delta.dy != 0 && g.bottom > g.top) s.shiftPrice(d.delta.dy / (g.bottom - g.top) / s.priceZoom);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +139,8 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
   void _hover(Offset p) {
     final g = _geo;
     if (g == null || !s.loaded) return;
+    final axis = _onAxis(p);
+    if (axis != _overAxis) setState(() => _overAxis = axis);
     if (p.dx < 0 || p.dx > g.plotW || p.dy > g.plotH) {
       s.hover.value = null;
       return;
@@ -53,6 +151,13 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
   void _tap(Offset p) {
     final g = _geo;
     if (g == null) return;
+    if (_onAxis(p)) {
+      // Double-click the price axis: back to autoscale.
+      final now = DateTime.now();
+      if (now.difference(_lastAxisTap).inMilliseconds < 350) s.resetPriceScale();
+      _lastAxisTap = now;
+      return;
+    }
     _hover(p);
     final h = s.hover.value;
     if (h == null) return;
@@ -76,18 +181,25 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
   @override
   Widget build(BuildContext context) => Listener(
         onPointerSignal: (e) {
-          if (e is PointerScrollEvent) {
-            final d = e.scrollDelta.dy != 0 ? e.scrollDelta.dy : e.scrollDelta.dx;
-            s.pan(d.sign.toInt() * max(2, (s.zoom * 0.04).round()));
-          }
+          if (e is PointerScrollEvent) _onScroll(e);
         },
+        onPointerPanZoomStart: _onSwipeStart,
+        onPointerPanZoomUpdate: _onSwipe,
         child: MouseRegion(
-          cursor: SystemMouseCursors.precise,
+          cursor: _dragging
+              ? (_dragAxis ? SystemMouseCursors.resizeUpDown : SystemMouseCursors.grabbing)
+              : (_overAxis ? SystemMouseCursors.resizeUpDown : SystemMouseCursors.precise),
           onHover: (e) => _hover(e.localPosition),
           onExit: (_) => s.hover.value = null,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
+            // Mouse/touch drag only: two-finger touchpad gestures are handled by the Listener above.
+            supportedDevices: const {PointerDeviceKind.mouse, PointerDeviceKind.touch, PointerDeviceKind.stylus, PointerDeviceKind.invertedStylus},
             onTapUp: (d) => _tap(d.localPosition),
+            onPanStart: _onDragStart,
+            onPanUpdate: _onDrag,
+            onPanEnd: (_) => setState(() => _dragging = false),
+            onPanCancel: () => setState(() => _dragging = false),
             child: CustomPaint(painter: ChartPainter(s, _pulse, (g) => _geo = g), child: const SizedBox.expand()),
           ),
         ),

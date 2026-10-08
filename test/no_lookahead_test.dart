@@ -60,6 +60,11 @@ void main() {
     s.enterReplay();
     s.startAt(touch - 1);
     expect(autoscaleHi(s), lessThan(110));
+    // A manual price scale/shift stretches that autoscale; it still can't reach the future bar.
+    s.scalePrice(0.5);
+    s.shiftPrice(0.3);
+    expect(autoscaleHi(s), lessThan(110));
+    s.resetPriceScale();
     s.step(1);
     expect(s.visibleCursor, touch);
     expect(autoscaleHi(s), greaterThan(150));

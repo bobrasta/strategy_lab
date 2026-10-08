@@ -15,6 +15,7 @@
 - **Steps 3–5.** These were already correct in the design. The zone "outcome known" rule was extracted for testing. Tests cover the zone colour, counters, events table, autoscale, Predict, Next touch, 100 bars/s batching and the export fields.
 - **Steps 6–7.** Tests cover bookmarks and resampling. The real M1 file resampled to M15 equals the M15 file on every sampled bar (Δ = 0).
 - `--dart-define=CANDLES=… EVENTS=…` opens files at startup.
+- Chart navigation: drag (time + price), two-finger touchpad up/down = zoom and left/right = scroll (axis locked per swipe, pinch zooms too), wheel = zoom, Shift+wheel = scroll, price-axis drag = candle height, double-click axis / Fit = autoscale. Tests in `test/chart_gestures_test.dart`.
 
 ## Verified
 
@@ -24,6 +25,9 @@
 - UI-isolate stalls in profile mode: M15 load 19 ms, M1 load 85 ms. Once at the end of events loading there's ~180 ms (first filter pass over ~170k real/fake/control events). Debug builds are 2–4× slower.
 
 ## Decisions
+
+- Touchpad direction: fingers up = zoom in (like wheel up). If it feels inverted with your natural-scrolling setting, flip `_zoomPerPx` in `price_chart.dart`.
+- Chart drag is limited to mouse/touch devices; touchpad two-finger gestures go to the Listener (Flutter's drag recognizer would otherwise claim them). `PointerPanZoomUpdateEvent.localPan` is offset by the widget's position, so the axis lock uses the global `pan`.
 
 - Control semantics (user's choice): the control run's own real − fake, not a pooled "control" group. Candidate = real − fake z ≥ 2 and control z < 2; artifact = control z ≥ 2; min 30 resolved per group.
 - 2024–25 out-of-sample is shown (user has run `--confirm`). The 2026 hold-out stays locked behind the design's reveal step.

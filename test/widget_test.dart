@@ -1,19 +1,9 @@
-import 'dart:io';
-
 import 'package:backy/main.dart';
 import 'package:backy/state/app_state.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Geist isn't bundled; on this machine the app falls back to Noto Sans, so measure with it.
-Future<void> loadFallbackFont() async {
-  const noto = '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf';
-  if (!File(noto).existsSync()) return;
-  for (final family in ['Geist', 'Noto Sans']) {
-    await (FontLoader(family)..addFont(Future.value(ByteData.sublistView(File(noto).readAsBytesSync())))).load();
-  }
-}
+import 'support.dart';
 
 void main() {
   for (final size in const [Size(1440, 900), Size(1920, 1037)]) {

@@ -73,6 +73,18 @@ Shift+→ next formation/touch/resolution · F focus · Esc cancel / leave M1 dr
 Predictions persist for the session across replay restarts; export via the overlay
 (CSV: formation_time, dir, scenario, session, size_q, call, actual, correct, answered_at).
 
+## Chart navigation
+
+- **Drag** the chart: left/right scrolls through time, up/down moves the price view.
+- **Two fingers on the touchpad**: up/down zooms (around the pointer), left/right scrolls. Each swipe locks
+  to its main direction, so a sideways swipe never zooms. Pinch also zooms.
+- **Mouse wheel** zooms around the pointer; **Shift + wheel** scrolls.
+- **Drag the price axis** up/down to make candles taller/shorter. **Double-click** the axis (or Fit) to go
+  back to autoscale. The manual scale stretches the autoscaled range, which is still built from bars ≤ the
+  replay cursor only, so it can't reveal the future.
+- Gestures stop zooming out at 5,000 bars (Fit still shows everything). Directions can be flipped with the
+  constants at the top of `_PriceChartState` in `lib/chart/price_chart.dart`.
+
 ## Timeframes
 
 With an M1 file loaded, M1/M5/M15/H1 are resampled in an isolate and cached. Events stay on the
