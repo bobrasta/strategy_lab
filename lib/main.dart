@@ -8,9 +8,15 @@ import 'theme.dart';
 /// Run with `flutter run -d linux --dart-define=PRESET=3` to open a demo state on
 /// the bundled sample data: 1 explore · 2 explore + drawers · 3 replay ·
 /// 4 replay predict · 5 empty (default; load your own files).
-void main() {
+/// `--dart-define=CANDLES=<csv> --dart-define=EVENTS=<csv>` opens those files at startup.
+Future<void> main() async {
   const preset = int.fromEnvironment('PRESET', defaultValue: 5);
-  runApp(FvgLabApp(state: AppState()..applyPreset(preset)..restorePrefs()));
+  const candles = String.fromEnvironment('CANDLES'), events = String.fromEnvironment('EVENTS');
+  final state = AppState()..applyPreset(preset);
+  runApp(FvgLabApp(state: state));
+  await state.restorePrefs();
+  if (candles.isNotEmpty) await state.loadCandles(candles);
+  if (events.isNotEmpty) await state.loadEvents(events);
 }
 
 class FvgLabApp extends StatefulWidget {
