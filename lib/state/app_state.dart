@@ -51,6 +51,9 @@ const kFilterOptions = <String, List<String>>{
   'Period': ['All', 'In-sample 2021–23', 'Out-of-sample 2024–25', 'Hold-out 2026'],
 };
 
+/// Conditional-study filters, shown in the top bar's Filters popover (the rest stay in the bar).
+const kConditionFilters = ['Displacement', 'Formation session', 'Touch session', 'HTF trend', 'Age', 'Sweep', 'Period'];
+
 /// Filter column each optional filter needs in fvg_events.csv.
 const _filterColumn = {'Displacement': 'disp_q', 'HTF trend': 'htf_trend', 'Sweep': 'sweep'};
 
@@ -405,6 +408,16 @@ class AppState extends ChangeNotifier {
 
   bool get anyFilter => starredOnly || filters.values.any((v) => v != 0);
 
+  int get activeConditionFilters => kConditionFilters.where((k) => filters[k] != 0).length;
+
+  void clearConditionFilters() {
+    for (final k in kConditionFilters) {
+      filters[k] = 0;
+    }
+    _applyFilters();
+    notifyListeners();
+  }
+
   Future<void> _mapAndApply([List<String>? notes]) async {
     notes ??= [];
     eventsTf = null;
@@ -595,7 +608,8 @@ class AppState extends ChangeNotifier {
 
   void toggleFocus() => _set(() => focus = !focus);
   void toggleLayer(String id) => _set(() => layersOn.contains(id) ? layersOn.remove(id) : layersOn.add(id));
-  final Set<String> layersOn = {'fvg', 'levels', 'labels'};
+  /// 'labels' (all zone labels) and 'selected' (selected zone only) start off.
+  final Set<String> layersOn = {'fvg', 'levels'};
   void setSearch(String q) => _set(() => search = q);
   void setK(double v) => _set(() => k = v.clamp(0.25, 3.0).toDouble());
   void setFailBuffer(double v) => _set(() => failBuffer = v.clamp(0.0, 1.0).toDouble());

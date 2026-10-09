@@ -71,7 +71,21 @@ class Comparison {
 }
 
 const kMinCurveN = 20;
-const kHistBuckets = 13; // 0.0–0.1 … 1.1–1.2, ≥1.2 (gap units)
+const kHistBuckets = 10; // 0.0–0.1 … 0.9–1.0 (gap units)
+
+/// The scenario fvg_study.py's "Where inside the gap did bounces turn?" uses (max_wick < 1).
+const kCleanBounce = 'bounce_inside_gap';
+
+/// Histogram bucket of a clean bounce's max wick, with fvg_study.py's bins:
+/// pd.cut(max_wick, np.arange(0, 1.01, 0.1), include_lowest=True), i.e. edges k·0.1,
+/// right-closed, 0 included. Null outside 0–1.
+int? cleanBounceBucket(double w) {
+  if (w < 0) return null;
+  for (var k = 0; k < kHistBuckets; k++) {
+    if (w <= (k + 1) * 0.1) return k;
+  }
+  return null;
+}
 
 /// All numbers come from the loaded fvg_events.csv (after filters). Nothing is
 /// derived from Dart-side gap detection.
@@ -100,8 +114,11 @@ class StudyStats {
   final List<double?> curve;
   final List<int> curveN;
 
-  /// max_wick of bounce events.
+  /// max_wick of clean bounces ([kCleanBounce]), [kHistBuckets] buckets of 0.1.
   final List<int> hist;
+
+  /// Events in [hist].
+  int get cleanBounces => hist.fold(0, (a, b) => a + b);
 
   int get resolved => bounces + throughs;
 
@@ -147,7 +164,10 @@ StudyStats computeStats(List<FvgEvent> evs) {
     switch (e.outcome) {
       case EvOutcome.bounce:
         b++;
-        hist[min(kHistBuckets - 1, max(0, (e.maxWick * 10).floor()))]++;
+        if (e.scenario == kCleanBounce) {
+          final k = cleanBounceBucket(e.maxWick);
+          if (k != null) hist[k]++;
+        }
       case EvOutcome.through:
         t++;
       case EvOutcome.timeout:

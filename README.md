@@ -73,6 +73,18 @@ Shift+→ next formation/touch/resolution · F focus · Esc cancel / leave M1 dr
 Predictions persist for the session across replay restarts; export via the overlay
 (CSV: formation_time, dir, scenario, session, size_q, call, actual, correct, answered_at).
 
+## Zones and labels
+
+- Non-selected zones are drawn at ~35% strength; the selected one (or the pending call in Predict) at full.
+- Labels show only on the selected zone and the one under the mouse: `Bounce · wick 0.44`, `Break · wick 3.25`
+  (wick = the study's max_wick once resolved), `Open · wick 0.31` (running, bars ≤ cursor) or `Waiting`.
+  The **Labels** toggle shows them on every zone.
+- **Selected only** hides every other zone (with nothing selected, all zones show so you can pick one).
+- The condition filters (Displacement, Formation/Touch session, HTF trend, Age, Sweep, Period) are in the
+  top bar's **Filters** popover; the badge counts the active ones.
+- "Where clean bounces turned" counts only `bounce_inside_gap` events (max_wick < 1), with fvg_study.py's
+  bins: `pd.cut(max_wick, np.arange(0, 1.01, 0.1), include_lowest=True)`.
+
 ## Chart navigation
 
 - **Drag** the chart: left/right scrolls through time, up/down moves the price view.

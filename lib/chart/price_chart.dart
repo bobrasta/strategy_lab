@@ -11,6 +11,7 @@ import '../theme.dart';
 import '../util/format.dart';
 import 'chart_geometry.dart';
 import 'chart_layer.dart';
+import 'fvg_layer.dart';
 import 'paint_utils.dart';
 
 class PriceChart extends StatefulWidget {
@@ -166,9 +167,10 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
       return;
     }
     final cur = s.visibleCursor, price = g.price(h.y);
+    final ctx = LayerContext(state: s, candles: s.candles!, cursor: cur, pulse: 0);
     Zone? hit;
     for (final z in s.zones) {
-      if (z.formed > cur) continue;
+      if (z.formed > cur || !FvgLayer.drawn(z, ctx)) continue; // only zones that are on screen
       final end = cur >= z.end ? z.end : cur;
       if (h.bar >= z.start && h.bar <= end && price >= z.ev.bottom && price <= z.ev.top) {
         hit = z;

@@ -32,6 +32,15 @@ void main() {
     expect(s.stats.curve[5]!.toStringAsFixed(3), '0.481');
   }, skip: skip);
 
+  test("clean-bounce histogram n = number of bounce_inside_gap events in fvg_events.csv", () {
+    final lines = File(fx('fvg_events.csv')).readAsLinesSync();
+    final col = lines.first.split(',').indexOf('scenario');
+    final n = lines.skip(1).where((l) => l.isNotEmpty && l.split(',')[col] == 'bounce_inside_gap').length;
+    expect(n, greaterThan(1000));
+    expect(s.stats.cleanBounces, n);
+    expect(s.stats.hist, hasLength(10));
+  }, skip: skip);
+
   test('same numbers from plain fvg_events.csv (fallback without condition columns)', () {
     final plain = AppState();
     return plain.loadEvents(writeTemp('fvg_events.csv', File(fx('fvg_events.csv')).readAsStringSync())).then((_) {

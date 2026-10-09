@@ -15,6 +15,7 @@
 - **Steps 3–5.** These were already correct in the design. The zone "outcome known" rule was extracted for testing. Tests cover the zone colour, counters, events table, autoscale, Predict, Next touch, 100 bars/s batching and the export fields.
 - **Steps 6–7.** Tests cover bookmarks and resampling. The real M1 file resampled to M15 equals the M15 file on every sampled bar (Δ = 0).
 - `--dart-define=CANDLES=… EVENTS=…` opens files at startup.
+- Review fixes: clean-bounce histogram (bounce_inside_gap only, study's bins, 0.0–1.0; all ten bucket counts equal pandas, n = 6,019); zone labels off by default, shown for selected + hovered zone as "Bounce · wick 0.44"; non-selected zones at 35%; "Selected only" toggle; condition filters moved to a Filters popover with count badge (top bar fits at 1920 px). Age, Sweep, Period filters, the Asia preset and the hold-out lock were already in the design; now covered by `test/review_fixes_test.dart`.
 - Chart navigation: drag (time + price), two-finger touchpad up/down = zoom and left/right = scroll (axis locked per swipe, pinch zooms too), wheel = zoom, Shift+wheel = scroll, price-axis drag = candle height, double-click axis / Fit = autoscale. Tests in `test/chart_gestures_test.dart`.
 
 ## Verified
@@ -25,6 +26,9 @@
 - UI-isolate stalls in profile mode: M15 load 19 ms, M1 load 85 ms. Once at the end of events loading there's ~180 ms (first filter pass over ~170k real/fake/control events). Debug builds are 2–4× slower.
 
 ## Decisions
+
+- Non-selected zones are dimmed even when nothing is selected (taken literally from the review). "Selected only" with no selection shows all zones, so there's always something to click.
+- Gap size, Starred and Presets stay in the top bar (the review listed neither them to move nor to keep); everything fits at 1920 px.
 
 - Touchpad direction: fingers up = zoom in (like wheel up). If it feels inverted with your natural-scrolling setting, flip `_zoomPerPx` in `price_chart.dart`.
 - Chart drag is limited to mouse/touch devices; touchpad two-finger gestures go to the Listener (Flutter's drag recognizer would otherwise claim them). `PointerPanZoomUpdateEvent.localPan` is offset by the widget's position, so the axis lock uses the global `pan`.

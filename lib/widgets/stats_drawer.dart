@@ -81,7 +81,7 @@ class StatsDrawer extends StatelessWidget {
             const SizedBox(height: 22),
             Text('Where clean bounces turned', style: ts(13, w: FontWeight.w500)),
             const SizedBox(height: 4),
-            Text('Max wick depth of bounce events, 0.1-gap buckets · n = ${fmtInt(st.bounces)}', style: ts(11, color: C.mute)),
+            Text('Max wick depth of bounces inside the gap, 0.1-gap buckets · n = ${fmtInt(st.cleanBounces)}', style: ts(11, color: C.mute)),
             const SizedBox(height: 10),
             AspectRatio(aspectRatio: 348 / 124, child: CustomPaint(painter: _HistPainter(st.hist))),
           ],
@@ -324,8 +324,7 @@ class _HistPainter extends CustomPainter {
     c.drawLine(Offset(0, size.height - b), Offset(size.width, size.height - b), Paint()..color = C.line);
     drawText(c, '0', Offset(0, size.height - 8), st);
     drawText(c, '0.5', Offset(5 * bw, size.height - 8), st, align: TextAlign.center);
-    drawText(c, '1.0', Offset(10 * bw, size.height - 8), st, align: TextAlign.center);
-    drawText(c, '${((hist.length - 1) / 10).toStringAsFixed(1)}+', Offset(size.width, size.height - 8), st, align: TextAlign.right);
+    drawText(c, '1.0', Offset(size.width, size.height - 8), st, align: TextAlign.right);
   }
 
   @override

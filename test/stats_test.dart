@@ -2,7 +2,7 @@ import 'package:backy/data/events.dart';
 import 'package:backy/data/stats.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-FvgEvent ev(EvOutcome o, {double wick = 0.3, int? bars = 5, String time = '2022-03-01 01:00:00', String? kind}) => FvgEvent(
+FvgEvent ev(EvOutcome o, {double wick = 0.3, int? bars = 5, String time = '2022-03-01 01:00:00', String? kind, String scenario = ''}) => FvgEvent(
       time: time,
       touchTime: time,
       endTime: time,
@@ -18,7 +18,7 @@ FvgEvent ev(EvOutcome o, {double wick = 0.3, int? bars = 5, String time = '2022-
       maxClose: 0,
       outcome: o,
       bars: bars,
-      scenario: '',
+      scenario: scenario,
       sizeQ: 'Q2',
       session: 'Asia',
       kind: kind,
@@ -59,12 +59,32 @@ void main() {
       expect(s.curveN[5], 20);
     });
 
-    test('histogram buckets bounce wick depth in 0.1 steps, last bucket open', () {
-      final s = computeStats([ev(EvOutcome.bounce, wick: 0.05), ev(EvOutcome.bounce, wick: 0.15), ev(EvOutcome.bounce, wick: 3.0), ev(EvOutcome.through, wick: 0.15)]);
-      expect(s.hist[0], 1);
-      expect(s.hist[1], 1);
-      expect(s.hist.last, 1);
-      expect(s.hist.fold<int>(0, (a, b) => a + b), 3);
+    test('clean-bounce histogram: only bounce_inside_gap, 0.0–1.0 in ten 0.1 buckets', () {
+      FvgEvent clean(double w) => ev(EvOutcome.bounce, wick: w, scenario: 'bounce_inside_gap');
+      final s = computeStats([
+        clean(0.05), clean(0.15), clean(0.95),
+        ev(EvOutcome.bounce, wick: 1.4, scenario: 'wick_through_then_bounce'), // not a clean bounce
+        ev(EvOutcome.bounce, wick: 0.15, scenario: 'closed_beyond_then_reclaimed'),
+        ev(EvOutcome.through, wick: 0.15, scenario: 'broke_through'),
+      ]);
+      expect(s.hist, hasLength(10));
+      expect(s.hist, [1, 1, 0, 0, 0, 0, 0, 0, 0, 1]);
+      expect(s.cleanBounces, 3);
+      expect(s.bounces, 5, reason: 'bounce rate still counts every bounce');
+    });
+
+    test("bucket edges match pd.cut(np.arange(0, 1.01, 0.1), include_lowest=True)", () {
+      // right-closed bins with edges k*0.1 (0.30000000000000004, not 0.3); 0 is in the first bin
+      expect(cleanBounceBucket(0), 0);
+      expect(cleanBounceBucket(0.1), 0);
+      expect(cleanBounceBucket(0.1000001), 1);
+      expect(cleanBounceBucket(0.3), 2);
+      expect(cleanBounceBucket(0.30000000000000004), 2);
+      expect(cleanBounceBucket(0.3000000000000001), 3);
+      expect(cleanBounceBucket(0.999), 9);
+      expect(cleanBounceBucket(1.0), 9);
+      expect(cleanBounceBucket(1.01), isNull);
+      expect(cleanBounceBucket(-0.01), isNull);
     });
 
     test('median wick and average bars (timeouts excluded)', () {

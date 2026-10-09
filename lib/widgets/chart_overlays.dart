@@ -177,6 +177,7 @@ class ChartToolbar extends StatelessWidget {
         toggle('fvg', 'Zones'),
         toggle('levels', 'Levels'),
         toggle('labels', 'Labels'),
+        toggle('selected', 'Selected only'),
       ]),
     );
   }

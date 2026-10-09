@@ -32,7 +32,10 @@ class TopBar extends StatelessWidget {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(children: [
-                  for (final k in kFilterOptions.keys) ...[_FilterMenu(state: s, name: k), const SizedBox(width: 6)],
+                  for (final k in kFilterOptions.keys)
+                    if (!kConditionFilters.contains(k)) ...[_FilterMenu(state: s, name: k), const SizedBox(width: 6)],
+                  _ConditionFilters(state: s),
+                  const SizedBox(width: 6),
                   _StarredChip(on: s.starredOnly, onTap: s.toggleStarredOnly),
                   const SizedBox(width: 6),
                   _PresetsMenu(state: s),
@@ -138,6 +141,121 @@ class _FilterMenu extends StatelessWidget {
       ),
       ),
     );
+  }
+}
+
+/// "Filters" button with a count badge; opens a popover with the conditional-study filters.
+class _ConditionFilters extends StatefulWidget {
+  const _ConditionFilters({required this.state});
+  final AppState state;
+
+  @override
+  State<_ConditionFilters> createState() => _ConditionFiltersState();
+}
+
+class _ConditionFiltersState extends State<_ConditionFilters> {
+  final _portal = OverlayPortalController();
+  final _link = LayerLink();
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.state, n = s.activeConditionFilters;
+    return CompositedTransformTarget(
+      link: _link,
+      child: OverlayPortal(
+        controller: _portal,
+        overlayChildBuilder: (_) => Stack(children: [
+          Positioned.fill(child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _portal.hide)),
+          CompositedTransformFollower(
+            link: _link,
+            targetAnchor: Alignment.bottomLeft,
+            offset: const Offset(0, 6),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Material(type: MaterialType.transparency, child: ListenableBuilder(listenable: s, builder: (_, _) => _FiltersPanel(state: s))),
+            ),
+          ),
+        ]),
+        child: HoverBox(
+          onTap: _portal.toggle,
+          builder: (context, h) => Container(
+            key: const ValueKey('filters-button'),
+            height: 32,
+            padding: const EdgeInsets.only(left: 12, right: 10),
+            decoration: BoxDecoration(
+              color: h ? C.text.withOpacity(0.05) : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: n > 0 ? C.lineHover : C.line),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(AppIcons.study, size: 14, color: n > 0 ? C.text : C.mute),
+              const SizedBox(width: 6),
+              Text('Filters', style: ts(13, color: n > 0 ? C.text : C.mute)),
+              if (n > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  height: 18,
+                  constraints: const BoxConstraints(minWidth: 18),
+                  padding: const EdgeInsets.symmetric(horizontal: 5),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: C.gold.withOpacity(0.15), borderRadius: BorderRadius.circular(999)),
+                  child: Text('$n', style: ts(11, color: C.gold, w: FontWeight.w600)),
+                ),
+              ],
+              const SizedBox(width: 4),
+              const Icon(AppIcons.down, size: 14, color: C.mute),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FiltersPanel extends StatelessWidget {
+  const _FiltersPanel({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = state;
+    return Panel(
+      radius: 12,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      shadow: const [BoxShadow(color: Color(0x73000000), blurRadius: 40, offset: Offset(0, 12))],
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Text('Conditions', style: ts(13, w: FontWeight.w500)),
+          const SizedBox(width: 12),
+          Text('Same filters apply to fake and control zones', style: ts(11, color: C.mute)),
+        ]),
+        const SizedBox(height: 10),
+        for (final k in kConditionFilters) _row(s, k),
+        const SizedBox(height: 6),
+        PillButton(label: 'Reset conditions', height: 28, fontSize: 12, enabled: s.activeConditionFilters > 0, onTap: s.clearConditionFilters),
+      ]),
+    );
+  }
+
+  Widget _row(AppState s, String k) {
+    final opts = kFilterOptions[k]!, available = s.filterAvailable(k);
+    final row = Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        SizedBox(width: 120, child: Text(k, style: ts(12, color: C.mute))),
+        Segmented<int>(
+          values: [for (var i = 0; i < opts.length; i++) i],
+          selected: s.filters[k]!,
+          onChanged: (i) => s.setFilter(k, i),
+          labelOf: (i) => opts[i],
+          enabledOf: (_) => available,
+          height: 24,
+          fontSize: 12,
+          padH: 10,
+        ),
+      ]),
+    );
+    return available ? row : Tooltip(message: 'No ${k.toLowerCase()} column in the events file', child: row);
   }
 }
 
