@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-/// Palette. Accents carry meaning only: green = bounce/positive,
-/// red = break-through/negative, gold = selected item, replay cursor, active lines.
+/// Palette. Accents carry meaning only: green = profit/positive,
+/// red = loss/negative, gold = selected item, replay cursor, active lines.
 class C {
   C._();
   static const bg = Color(0xFF0E0F11);
@@ -14,6 +14,10 @@ class C {
   static const green = Color(0xFF3DDC84);
   static const red = Color(0xFFF05252);
   static const gold = Color(0xFFC9A54C);
+
+  /// Strategy drawing palette only (SPEC §7.4: `amber`, `blue`); muted to sit with the rest.
+  static const amber = Color(0xFFD9913D);
+  static const blue = Color(0xFF5B8DD6);
 }
 
 const kFontFamily = 'Geist';
@@ -102,4 +106,18 @@ class AppIcons {
   static const check = Icons.check;
   static const warn = Icons.error_outline;
   static const info = Icons.info_outline;
+  static const tester = Icons.science_outlined;
+  static const results = Icons.table_chart_outlined;
+  static const history = Icons.history_toggle_off;
+  static const build = Icons.construction_outlined;
+  static const engine = Icons.memory_outlined;
+  static const lock = Icons.lock_outline;
+  static const unlock = Icons.lock_open_outlined;
+  static const stop = Icons.stop_rounded;
+  static const compare = Icons.compare_arrows;
+  static const folder = Icons.folder_open_outlined;
+  static const restart = Icons.restart_alt;
+  static const tall = Icons.unfold_more;
+  static const short = Icons.unfold_less;
+  static const nextTrade = Icons.skip_next_rounded;
 }

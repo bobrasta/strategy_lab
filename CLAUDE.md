@@ -1,30 +1,25 @@
-# FVG Lab (backy)
+# Strategy Lab
 
-Flutter Linux desktop viewer and replay tool for the Python FVG study.
+Flutter Linux desktop app for the Hummer backtesting engine: runs backtests through `hummer serve`, replays them, compares runs. It grew out of FVG Lab (`/home/bob/flutter_projects/backy`, reference only, never modify it).
 
 ## Folders
 
-- App: `/home/bob/flutter_projects/backy` (this repo).
-- Research data + Python: `/home/bob/Documents/fxdata` (not a git repo).
-  - `fvg_study.py` produces `fvg_events.csv`; `fvg_conditions.py` adds the conditional study; `fvg_baseline.py` real vs fake gaps.
-  - `index.py` is the Dukascopy downloader: don't touch.
-  - Candles: `xauusd_m15_2021-01-01_2026-01-01.csv`, `xauusd_m1_2021-01-01_2026-01-01.csv` (UTC, `YYYY-MM-DD HH:MM:SS`).
-- Never write app code into fxdata. Never copy the large CSVs into this project: the app loads them at runtime via file dialogs, tests reference them by absolute path (`FXDATA_DIR`, default `/home/bob/Documents/fxdata`) and skip with a message when missing.
+- App: `/home/bob/flutter_projects/strategy_lab` (this repo).
+- Engine: `/home/bob/projects/hummer-engine`. Its `CLAUDE.md` and `SPEC.md` (§8.2 service, §14 M6) apply. Runs are written to its `runs/` (git-ignored).
+- Market data: `/home/bob/Documents/fxdata` (read-only). Never copy the large CSVs into this repo; tests read them from `FXDATA_DIR` (default `/home/bob/Documents/fxdata`) and skip when missing. Real-engine tests use `HUMMER_REPO` (default the engine path) and skip without its binary.
 
 ## Hard rules
 
-1. Python is the single source of truth. The app never detects FVGs or computes outcomes. It only aggregates the per-event outcomes the study wrote. `lib/demo/demo_events.dart` is the only Dart gap detector and exists solely for the bundled sample presets (`--dart-define=PRESET=1..4`); it must never run on loaded files.
-2. No lookahead. `AppState.visibleCursor` is the only "now". Nothing right of it may be drawn or used: candles, zones, outcome colours, price autoscale, OHLC readout, counters, tables, Predict mode (the pending touch bar shows its open only until the call is made).
-3. Keep the existing visual design, theme (`lib/theme.dart`) and the `ChartLayer` architecture. Don't restyle unless the spec asks.
-4. Don't modify the core logic of `measure()` / `label()` in `fvg_study.py`, or the statistics / `--confirm` / `--control` behaviour of `fvg_conditions.py`. Only add outputs, and verify printed tables are unchanged after edits.
-
-## Parity targets (from fvg_events.csv, no filters)
-
-18,359 first touches · bounce rate 0.579 excluding timeouts · P(bounce | d=0.5) = 0.481 · in-sample Asia-formation real−fake diff +3.4pp.
+1. **Engine computes, app displays.** Every number shown comes from engine output files (`run.json`, `trades.json`, `deals.csv`, `equity.csv`, `drawings.jsonl`, `journal.txt`). Nothing is recomputed in Dart: no differences, ratios or percentages the engine didn't write. Rounding for display is fine.
+2. **No lookahead in replay.** `AppState.visibleCursor` is the only "now"; `AppState.nowMs` is its last instant (the cursor bar's last tick). Nothing stamped after it is drawn, listed or read: candles, trades (exit only once reached), drawings (state as of now), equity readouts and graph, tables, journal, price autoscale. The full-run report is hidden during replay.
+3. **Protected periods.** Per-strategy hold-out dates in the settings (default: `fvg_continuation` from 2024-01-01). Starting an overlapping run needs the confirmation dialog, which is logged with a timestamp in the run's folder (`protected_period_confirmation.json`). Results of overlapping runs are never shown (history, reports, compare, chart) unless that run was confirmed for that same period.
+4. **FVG continuation:** run it only on 2021-01-01 .. 2023-12-31 unless the user asks, never tune its defaults, and never summarise its results (P&L, win rates, R) unless the user asks. Tests check only that a run exists and has trades.
+5. **No process outlives the app.** The app owns `hummer serve`: `shutdown`, 2 s, then kill. Never run engine code in-process.
+6. Keep the existing visual design (`lib/theme.dart`, the pill/glass widgets in `lib/widgets/common.dart`) and the `ChartLayer` architecture.
+7. The UI isolate never blocks on big files: candles, equity and run files load in isolates (the 2M-row M1 data and the ~290 MB per-M1 `equity.csv` included).
 
 ## Working style
 
 - Commit after each step with a clear message; ask when the spec conflicts with code or is ambiguous.
 - Keep `NOTES.md` current (done / left / decisions).
-- Python: no `~/fvg-env`; system `python3` has pandas 2.2.3.
-- Verify with `flutter analyze` (no issues) and `flutter test`.
+- Verify with `flutter analyze` (no issues) and `flutter test`. The acceptance runs against the real engine are in `integration_test/` (see README).

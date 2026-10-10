@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../data/events.dart';
 import '../state/app_state.dart';
+import '../state/lab_state.dart';
 import '../theme.dart';
 import '../util/format.dart';
 import 'common.dart';
-import 'pills.dart';
 
 /// Top-left: symbol, bar time, OHLC of the hovered (or last knowable) bar.
 class OhlcReadout extends StatelessWidget {
@@ -25,10 +24,9 @@ class OhlcReadout extends StatelessWidget {
               ]));
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('XAUUSD', style: ts(13, w: FontWeight.w600, ls: 0.3)),
+              Text('${s.run?.manifest.profile['symbol'] ?? 'XAUUSD'}', style: ts(13, w: FontWeight.w600, ls: 0.3)),
               const SizedBox(width: 10),
-              Text('${s.timeframe} · ${fmtShort(c.time(hb))}', style: ts(12, color: C.mute)),
-              if (s.isSample) ...[const SizedBox(width: 10), Text('SAMPLE DATA', style: capsLabel(color: C.gold))],
+              Text('${s.timeframe} · ${fmtShort(c.time(hb))} UTC', style: ts(12, color: C.mute)),
             ]),
             const SizedBox(height: 6),
             Row(children: [
@@ -41,110 +39,6 @@ class OhlcReadout extends StatelessWidget {
           ]);
         },
       );
-}
-
-Future<bool> _confirmClear(BuildContext context, int n) async {
-  final r = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text('Clear ${fmtInt(n)} predictions?', style: ts(16, w: FontWeight.w500)),
-      content: SizedBox(
-        width: 360,
-        child: Text('This removes every call from this session. Export first if you want to keep them.', style: ts(13, color: C.mute, height: 1.4)),
-      ),
-      actions: [
-        PillButton(label: 'Cancel', onTap: () => Navigator.pop(ctx, false)),
-        PillButton(label: 'Clear', color: C.red, borderColor: C.red, onTap: () => Navigator.pop(ctx, true)),
-      ],
-    ),
-  );
-  return r ?? false;
-}
-
-/// Asks before unlocking hold-out stats. Returns true if revealed.
-Future<bool> confirmRevealHoldout(BuildContext context, AppState s) async {
-  final r = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: Text('Reveal the 2026 hold-out?', style: ts(16, w: FontWeight.w500)),
-      content: SizedBox(
-        width: 400,
-        child: Text(
-          "Hold-out stats and outcomes become visible for good, and today's date is recorded in fvg_holdout.json. "
-          'Only do this once your rules are frozen.',
-          style: ts(13, color: C.mute, height: 1.4),
-        ),
-      ),
-      actions: [
-        PillButton(label: 'Keep locked', onTap: () => Navigator.pop(ctx, false)),
-        PillButton(label: 'Reveal hold-out', color: C.gold, borderColor: C.gold, onTap: () => Navigator.pop(ctx, true)),
-      ],
-    ),
-  );
-  if (r == true) await s.revealHoldout();
-  return r ?? false;
-}
-
-/// Live counters + prediction controls, shown during replay.
-class ReplayCounters extends StatelessWidget {
-  const ReplayCounters({super.key, required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = state;
-    Widget stat(String v, String l) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(v, style: ts(18, w: FontWeight.w300)),
-          const SizedBox(height: 2),
-          Text(l, style: ts(11, color: C.mute)),
-        ]);
-    final showPred = s.predict || s.predictionLog.isNotEmpty;
-    return Glass(
-      radius: 12,
-      opacity: 0.82,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: IntrinsicHeight(
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Center(child: Text('REPLAY', style: capsLabel(color: C.gold))),
-          const SizedBox(width: 20),
-          stat('${s.openGaps}', 'Open gaps'),
-          const SizedBox(width: 20),
-          stat('${s.resolvedCount}', 'Resolved'),
-          const SizedBox(width: 20),
-          stat(s.runningBounceRate, 'Bounce rate'),
-          if (showPred) ...[
-            const SizedBox(width: 20),
-            Container(width: 1, color: C.line),
-            const SizedBox(width: 20),
-            Tooltip(
-              message: 'Correct / scored. Only calls whose outcome is already on screen are scored. ${fmtInt(s.predictionLog.length)} calls this session.',
-              child: stat(s.score, 'Your calls'),
-            ),
-            const SizedBox(width: 12),
-            Center(
-              child: RoundIconButton(
-                icon: AppIcons.export,
-                tooltip: 'Export predictions',
-                enabled: s.predictionLog.isNotEmpty,
-                onTap: s.exportPredictions,
-              ),
-            ),
-            Center(
-              child: RoundIconButton(
-                icon: AppIcons.clear,
-                color: C.mute,
-                tooltip: 'Clear predictions',
-                enabled: s.predictionLog.isNotEmpty,
-                onTap: () async {
-                  if (await _confirmClear(context, s.predictionLog.length)) s.clearPredictions();
-                },
-              ),
-            ),
-          ],
-        ]),
-      ),
-    );
-  }
 }
 
 class ChartToolbar extends StatelessWidget {
@@ -174,10 +68,8 @@ class ChartToolbar extends StatelessWidget {
         RoundIconButton(icon: AppIcons.zoomOut, tooltip: 'Zoom out', onTap: () => s.zoomBy(1.25)),
         RoundIconButton(icon: AppIcons.fit, tooltip: 'Fit', onTap: s.fit),
         const VDivider(height: 16),
-        toggle('fvg', 'Zones'),
-        toggle('levels', 'Levels'),
-        toggle('labels', 'Labels'),
-        toggle('selected', 'Selected only'),
+        if (s.run != null) ...[toggle('trades', 'Trades'), toggle('drawings', 'Drawings')],
+        if (s.events.isNotEmpty) toggle('fvg', 'FVG zones'),
       ]),
     );
   }
@@ -204,23 +96,17 @@ class ReplayTools extends StatelessWidget {
           ),
           PillButton(label: 'Jump to date', icon: AppIcons.calendar, height: 28, fontSize: 12, variant: PillVariant.ghost, onTap: s.toggleJump),
           Tooltip(
-            message: 'Starts 50 bars before the selected gap forms',
+            message: 'Starts 50 bars before the selected trade opens',
             child: PillButton(
-              label: 'Replay this event',
+              label: 'Replay selected trade',
               icon: AppIcons.replayEvent,
               height: 28,
               fontSize: 12,
               variant: PillVariant.ghost,
-              enabled: s.selected != null && s.zoneFor(s.selected!) != null,
-              onTap: s.replaySelected,
+              enabled: s.selectedTrade != null,
+              onTap: () => s.replayTrade(s.selectedTrade!),
             ),
           ),
-          const VDivider(height: 16),
-          const SizedBox(width: 6),
-          Text('Predict', style: ts(12)),
-          const SizedBox(width: 8),
-          PillSwitch(value: s.predict, onChanged: (_) => s.togglePredict(), width: 28, height: 16),
-          const SizedBox(width: 6),
         ]),
       ),
       if (s.selectMode) ...[
@@ -290,7 +176,7 @@ class ReplayDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = state, cur = s.visibleCursor;
-    final status = s.peek != null ? 'waiting for your call' : (s.playing ? 'playing' : 'paused');
+    final status = s.playing ? 'playing' : 'paused';
     return FittedBox(
       fit: BoxFit.scaleDown,
       child: Glass(
@@ -309,13 +195,12 @@ class ReplayDock extends StatelessWidget {
               iconSize: 22,
               filled: true,
               tooltip: 'Play / pause (Space)',
-              enabled: s.peek == null,
               onTap: s.togglePlay,
             ),
             const SizedBox(width: 2),
-            RoundIconButton(icon: AppIcons.stepFwd, size: 36, iconSize: 20, tooltip: 'Step forward (→) · Shift+→ next FVG event', onTap: () => s.step(1)),
+            RoundIconButton(icon: AppIcons.stepFwd, size: 36, iconSize: 20, tooltip: 'Step forward (→) · Shift+→ next trade event', onTap: () => s.step(1)),
             const SizedBox(width: 4),
-            PillButton(label: 'Next touch', icon: AppIcons.nextTouch, height: 32, fontSize: 12, variant: PillVariant.ghost, trailing: const Kbd('N'), onTap: s.nextTouch),
+            PillButton(label: 'Next trade', icon: AppIcons.nextTrade, height: 32, fontSize: 12, variant: PillVariant.ghost, trailing: const Kbd('N'), onTap: s.nextTrade, enabled: s.run != null),
             const VDivider(height: 24, margin: 8),
             Segmented<int>(values: kSpeeds, selected: s.speed, onChanged: s.setSpeed, labelOf: (v) => '$v×', height: 26, fontSize: 12, padH: 8),
             const SizedBox(width: 6),
@@ -333,38 +218,6 @@ class ReplayDock extends StatelessWidget {
           ]),
         ),
       ),
-    );
-  }
-}
-
-/// Shown while paused before a first-touch bar. Reveals nothing about the outcome.
-class PredictPrompt extends StatelessWidget {
-  const PredictPrompt({super.key, required this.state, required this.ev});
-  final AppState state;
-  final FvgEvent ev;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = state;
-    return Glass(
-      opacity: 0.95,
-      shadow: true,
-      borderColor: C.gold.withOpacity(0.45),
-      padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('NEXT BAR TOUCHES THE GAP · YOUR CALL', style: capsLabel(color: C.gold)),
-          const SizedBox(height: 2),
-          Text(
-            '${ev.isBull ? 'Bullish' : 'Bearish'} · ${ev.gapAtr.toStringAsFixed(2)}× ATR · ${ev.sizeQ} · ${ev.session} · waited ${ev.age} bars',
-            style: ts(13),
-          ),
-        ]),
-        const SizedBox(width: 16),
-        PillButton(label: 'Bounce', height: 40, fontSize: 14, color: C.green, borderColor: C.green, tint: C.green.withOpacity(0.08), onTap: () => s.guess('bounce')),
-        const SizedBox(width: 6),
-        PillButton(label: 'Break', height: 40, fontSize: 14, color: C.red, borderColor: C.red, tint: C.red.withOpacity(0.08), onTap: () => s.guess('break')),
-      ]),
     );
   }
 }
@@ -402,149 +255,6 @@ class MessageBanner extends StatelessWidget {
   }
 }
 
-/// Selected event in Explore: facts, star, note, replay and M1 drill-down.
-class EventDetailCard extends StatefulWidget {
-  const EventDetailCard({super.key, required this.state, required this.ev});
-  final AppState state;
-  final FvgEvent ev;
-  @override
-  State<EventDetailCard> createState() => _EventDetailCardState();
-}
-
-class _EventDetailCardState extends State<EventDetailCard> {
-  late final TextEditingController _note = TextEditingController(text: widget.state.bookmarks.note(widget.ev.id));
-
-  @override
-  void didUpdateWidget(EventDetailCard old) {
-    super.didUpdateWidget(old);
-    if (old.ev.id != widget.ev.id) _note.text = widget.state.bookmarks.note(widget.ev.id);
-  }
-
-  @override
-  void dispose() {
-    _note.dispose();
-    super.dispose();
-  }
-
-  Widget _fact(String k, String v) => Container(
-        height: 20,
-        padding: const EdgeInsets.symmetric(horizontal: 9),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(border: Border.all(color: C.line), borderRadius: BorderRadius.circular(999)),
-        child: Text.rich(TextSpan(children: [
-          TextSpan(text: '$k ', style: ts(11, color: C.mute)),
-          TextSpan(text: v, style: ts(11)),
-        ])),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final s = widget.state, ev = widget.ev, starred = s.bookmarks.starred(ev.id), locked = s.outcomeHidden(ev);
-    return Glass(
-      radius: 16,
-      opacity: 0.95,
-      shadow: true,
-      padding: const EdgeInsets.all(14),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
-          Icon(ev.isBull ? AppIcons.bull : AppIcons.bear, size: 14, color: C.mute),
-          const SizedBox(width: 6),
-          Expanded(child: Text('${ev.isBull ? 'Bullish' : 'Bearish'} gap · ${ev.time}', overflow: TextOverflow.ellipsis, style: ts(13, w: FontWeight.w500))),
-          RoundIconButton(icon: starred ? AppIcons.star : AppIcons.starOutline, color: starred ? C.gold : C.mute, tooltip: 'Star', onTap: () => s.toggleStar(ev.id)),
-          RoundIconButton(icon: AppIcons.close, color: C.mute, onTap: () => s.select(null)),
-        ]),
-        const SizedBox(height: 10),
-        Wrap(spacing: 6, runSpacing: 6, children: [
-          if (locked) _fact('Hold-out', 'locked') else ...[scenarioPill(ev.scenario), outcomePill(ev.outcome)],
-          _fact('Gap', '${ev.gapAtr.toStringAsFixed(2)}× ATR'),
-          _fact('Size', ev.sizeQ),
-          if (ev.dispQ != null) _fact('Displacement', ev.dispQ!),
-          _fact('Formed', ev.session),
-          if (ev.touchSession != null) _fact('Touched', ev.touchSession!),
-          if (ev.htfTrend != null) _fact('HTF', ev.htfTrend!),
-          if (ev.sweep != null) _fact('Sweep', ev.sweep! ? 'yes' : 'no'),
-          _fact('Waited', '${ev.age}'),
-          _fact('Period', periodLabel(ev.period)),
-          if (!locked) ...[
-            _fact('Max wick', ev.maxWick.toStringAsFixed(2)),
-            _fact('Max close', ev.maxClose.toStringAsFixed(2)),
-            if (ev.bars != null) _fact('Resolved in', '${ev.bars}'),
-          ],
-        ]),
-        const SizedBox(height: 10),
-        Container(
-          height: 32,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          alignment: Alignment.centerLeft,
-          decoration: BoxDecoration(border: Border.all(color: C.line), borderRadius: BorderRadius.circular(999)),
-          child: TextField(
-            controller: _note,
-            onChanged: (t) => s.setNote(ev.id, t),
-            style: ts(12),
-            decoration: InputDecoration.collapsed(hintText: 'Add a one-line note', hintStyle: ts(12, color: C.mute)),
-          ),
-        ),
-        const SizedBox(height: 10),
-        Row(children: [
-          PillButton(
-            label: 'Replay this event',
-            icon: AppIcons.replayEvent,
-            height: 30,
-            fontSize: 12,
-            enabled: s.zoneFor(ev.id) != null && s.drill == null,
-            onTap: s.replaySelected,
-          ),
-          const SizedBox(width: 6),
-          if (s.drill == null)
-            Tooltip(
-              message: s.hasM1 ? 'Formation to resolution on M1' : 'Load an M1 candle file to drill down',
-              child: PillButton(label: 'View on M1', icon: AppIcons.drill, height: 30, fontSize: 12, enabled: s.hasM1, onTap: s.viewOnM1),
-            )
-          else
-            PillButton(label: 'Back to ${s.drill!.prevTf}', height: 30, fontSize: 12, trailing: const Kbd('Esc'), onTap: s.exitDrill),
-        ]),
-      ]),
-    );
-  }
-}
-
-class EmptyState extends StatelessWidget {
-  const EmptyState({super.key, required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) => CustomPaint(
-        painter: _DotGrid(),
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
-            decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(16)),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: C.line)),
-                child: const Icon(AppIcons.data, size: 20, color: C.mute),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                state.eventsLoaded
-                    ? 'Events loaded. Load the candle file they were computed on to see them on the chart.'
-                    : 'Load XAUUSD candles and fvg_events.csv from your Python study to start.',
-                style: ts(15),
-              ),
-              const SizedBox(height: 20),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                PillButton(label: 'Load candles', icon: AppIcons.upload, variant: PillVariant.primary, height: 36, enabled: state.busy == null, onTap: state.pickCandles),
-                const SizedBox(width: 8),
-                PillButton(label: 'Load events', icon: AppIcons.upload, height: 36, enabled: state.busy == null, onTap: state.pickEvents),
-              ]),
-            ]),
-          ),
-        ),
-      );
-}
-
 class _DotGrid extends CustomPainter {
   @override
   void paint(Canvas c, Size s) {
@@ -560,8 +270,90 @@ class _DotGrid extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter old) => false;
 }
 
-/// Exposed for the events table.
-EvOutcome? visibleOutcome(AppState s, FvgEvent e) {
-  if (s.outcomeHidden(e)) return null;
-  return s.isReplay && !s.selectMode && (!e.mapped || e.endIdx > s.visibleCursor) ? null : e.outcome;
+/// Position, floating P&L, equity, balance and margin at the cursor: the exact equity.csv row
+/// stamped at or before the cursor's last tick, and the trade open at that moment.
+class RunReadout extends StatelessWidget {
+  const RunReadout({super.key, required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = state, run = s.run;
+    if (run == null) return const SizedBox.shrink();
+    final now = s.nowMs, row = run.equityAt(now), pos = run.positionAt(now);
+    Widget stat(String v, String l, {Color color = C.text, Key? key}) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(v, key: key, style: ts(16, w: FontWeight.w300, color: color)),
+          const SizedBox(height: 2),
+          Text(l, style: ts(11, color: C.mute)),
+        ]);
+    final profit = row?.profit;
+    return Glass(
+      radius: 12,
+      opacity: 0.82,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: IntrinsicHeight(
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Center(child: Text(s.isReplay && !s.selectMode ? 'REPLAY' : 'END OF RUN', style: capsLabel(color: s.isReplay ? C.gold : C.mute))),
+          const SizedBox(width: 18),
+          stat(
+            pos == null ? 'Flat' : '${pos.isBuy ? 'Buy' : 'Sell'} ${pos.volume} @ ${pos.openPrice.toStringAsFixed(3)}',
+            pos == null ? 'Position' : 'Position #${pos.ticket}${pos.slInitial > 0 ? ' · SL ${pos.slInitial.toStringAsFixed(3)}' : ''}${pos.tpInitial > 0 ? ' · TP ${pos.tpInitial.toStringAsFixed(3)}' : ''}',
+            key: const ValueKey('readout-position'),
+          ),
+          const SizedBox(width: 18),
+          stat(fmtMoneySigned(profit), 'Floating P&L', color: profit == null || profit == 0 ? C.text : (profit > 0 ? C.green : C.red)),
+          const SizedBox(width: 18),
+          stat(fmtMoney(row?.equity), 'Equity', key: const ValueKey('readout-equity')),
+          const SizedBox(width: 18),
+          stat(fmtMoney(row?.balance), 'Balance'),
+          const SizedBox(width: 18),
+          stat(fmtMoney(row?.margin), 'Margin'),
+          if (row != null) ...[
+            const SizedBox(width: 18),
+            Container(width: 1, color: C.line),
+            const SizedBox(width: 12),
+            Center(child: Text('equity.csv\n${fmtShort(DateTime.fromMillisecondsSinceEpoch(row.ms, isUtc: true))}', style: ts(10.5, color: C.mute, height: 1.3))),
+          ],
+        ]),
+      ),
+    );
+  }
 }
+
+class EmptyState extends StatelessWidget {
+  const EmptyState({super.key, required this.lab});
+  final LabState lab;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = lab.chart;
+    return CustomPaint(
+      painter: _DotGrid(),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+          decoration: BoxDecoration(color: C.bg, borderRadius: BorderRadius.circular(16)),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: C.line)),
+              child: lab.opening != null
+                  ? const Padding(padding: EdgeInsets.all(14), child: CircularProgressIndicator(strokeWidth: 1.5, color: C.mute))
+                  : const Icon(AppIcons.tester, size: 20, color: C.mute),
+            ),
+            const SizedBox(height: 20),
+            Text(lab.opening ?? 'Start a backtest in the Tester, or open a past run from History.', style: ts(15)),
+            const SizedBox(height: 20),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              PillButton(label: 'Open Tester', icon: AppIcons.tester, variant: PillVariant.primary, height: 36, onTap: () => s.toggleRight(true)),
+              const SizedBox(width: 8),
+              PillButton(label: 'Run history', icon: AppIcons.history, height: 36, onTap: () => s.showTab(ResultsTab.history)),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+

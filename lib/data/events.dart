@@ -199,12 +199,11 @@ class FvgEvent {
   double fail(double buffer) => isBull ? far - buffer * gap : far + buffer * gap;
 }
 
-/// Maps event times to bar indices by exact string match. Returns the number not found.
+/// Maps event times to bar indices by exact bar-open time. Returns the number not found.
 int mapEvents(List<FvgEvent> evs, Candles c) {
-  final idx = c.index;
   var miss = 0;
   for (final e in evs) {
-    final f = idx[e.time], t = idx[e.touchTime], en = idx[e.endTime];
+    final f = c.indexOf(e.formationMs), t = c.indexOf(e.touchMs), en = c.indexOf(e.endMs);
     if (f == null || t == null || en == null) {
       e.formedIdx = e.touchIdx = e.endIdx = -1;
       miss++;

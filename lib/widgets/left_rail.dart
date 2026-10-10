@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../chart/chart_layer.dart';
 import '../state/app_state.dart';
+import '../state/lab_state.dart';
 import '../theme.dart';
 import '../util/format.dart';
 import 'common.dart';
+import 'fields.dart';
+import 'top_bar.dart' show engineColor, engineLabel;
 
 class LogoMark extends StatelessWidget {
   const LogoMark({super.key});
@@ -34,32 +37,45 @@ class _LogoPainter extends CustomPainter {
 String _fileName(String? p) => p == null ? '' : p.split(RegExp(r'[\\/]')).last;
 
 class CollapsedRail extends StatelessWidget {
-  const CollapsedRail({super.key, required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) => Panel(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Column(children: [
-          const LogoMark(),
-          const SizedBox(height: 16),
-          for (final (icon, tip) in const [(AppIcons.data, 'Data'), (AppIcons.tools, 'Tools'), (AppIcons.study, 'FVG study')]) ...[
-            RoundIconButton(icon: icon, size: 40, radius: 12, iconSize: 18, color: C.mute, tooltip: tip, onTap: () => state.toggleLeft(true)),
-            const SizedBox(height: 6),
-          ],
-          const Spacer(),
-          RoundIconButton(icon: AppIcons.expand, size: 40, radius: 12, iconSize: 18, color: C.mute, tooltip: 'Expand', onTap: () => state.toggleLeft(true)),
-        ]),
-      );
-}
-
-class ExpandedRail extends StatelessWidget {
-  const ExpandedRail({super.key, required this.state});
-  final AppState state;
+  const CollapsedRail({super.key, required this.lab});
+  final LabState lab;
 
   @override
   Widget build(BuildContext context) {
-    final s = state, c = s.baseTf == null ? null : s.series[s.baseTf!];
+    final s = lab.chart;
+    return Panel(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(children: [
+        const LogoMark(),
+        const SizedBox(height: 16),
+        for (final (icon, tip, onTap) in [
+          (AppIcons.tester, 'Tester', () => s.toggleRight()),
+          (AppIcons.results, 'Results', () => s.toggleBottom()),
+          (AppIcons.history, 'Run history', () => s.showTab(ResultsTab.history)),
+          (AppIcons.tools, 'Layers and engine', () => s.toggleLeft(true)),
+        ]) ...[
+          RoundIconButton(icon: icon, size: 40, radius: 12, iconSize: 18, color: C.mute, tooltip: tip, onTap: onTap),
+          const SizedBox(height: 6),
+        ],
+        const Spacer(),
+        Tooltip(
+          message: lab.engine.message ?? engineLabel(lab),
+          child: Container(width: 8, height: 8, decoration: BoxDecoration(color: engineColor(lab.engine.status), shape: BoxShape.circle)),
+        ),
+        const SizedBox(height: 14),
+        RoundIconButton(icon: AppIcons.expand, size: 40, radius: 12, iconSize: 18, color: C.mute, tooltip: 'Expand', onTap: () => s.toggleLeft(true)),
+      ]),
+    );
+  }
+}
+
+class ExpandedRail extends StatelessWidget {
+  const ExpandedRail({super.key, required this.lab});
+  final LabState lab;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = lab.chart, m = s.run?.manifest, c = s.baseTf == null ? null : s.series[s.baseTf!];
     return Panel(
       shadow: const [BoxShadow(color: Color(0x8C000000), blurRadius: 60, offset: Offset(16, 0))],
       child: SingleChildScrollView(
@@ -70,67 +86,42 @@ class ExpandedRail extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('FVG Lab', style: ts(15, w: FontWeight.w600)),
-                Text('Gap reaction research', style: ts(11, color: C.mute)),
+                Text('Strategy Lab', style: ts(15, w: FontWeight.w600)),
+                Text('Hummer engine backtests', style: ts(11, color: C.mute)),
               ]),
             ),
             RoundIconButton(icon: AppIcons.collapse, size: 30, color: C.mute, onTap: () => s.toggleLeft(false)),
           ]),
           const SizedBox(height: 22),
-          Row(children: [
-            const SectionLabel('Data'),
-            const Spacer(),
-            if (s.isSample) Text('SAMPLE DATA', style: capsLabel(color: C.gold)),
-          ]),
+          const SectionLabel('Open run'),
           const SizedBox(height: 10),
-          if (c != null || s.eventsLoaded)
+          if (m != null && c != null)
             Panel(
               color: C.bg,
               radius: 12,
               padding: const EdgeInsets.all(12),
               child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                if (c != null) ...[
-                  Row(children: [
-                    Text('XAUUSD', style: ts(14, w: FontWeight.w500)),
-                    const SizedBox(width: 8),
-                    _tag(c.tf),
-                  ]),
-                  if (s.candlesPath != null) _kv('Candles', _fileName(s.candlesPath)),
-                  _kv('Range', '${fmtFull(c.time(0)).substring(0, 10)} → ${fmtFull(c.time(c.length - 1)).substring(0, 10)}'),
-                  _kv('Bars', fmtInt(c.length)),
-                ] else
-                  Text('No candles loaded', style: ts(12, color: C.mute)),
-                const SizedBox(height: 6),
-                if (s.eventsLoaded) ...[
-                  if (s.eventsPath != null) _kv('Events', _fileName(s.eventsPath)),
-                  _kv('First touches', fmtInt(s.events.length)),
-                  _kv('Events timeframe', s.eventsTf ?? '—'),
-                  if (s.unmatchedEvents > 0) _kv('Not on chart', fmtInt(s.unmatchedEvents)),
-                  _kv('Fake / control', '${s.fakeEvents.isEmpty ? '—' : fmtInt(s.fakeEvents.length)} / ${s.controlEvents.isEmpty ? '—' : fmtInt(s.controlEvents.length)}'),
-                  _kv('Hold-out 2026', s.holdoutLocked ? 'Locked' : 'Revealed ${fmtFull(s.holdoutRevealedAt!).substring(0, 10)}'),
-                  _kv('Starred', fmtInt(s.bookmarks.starredCount)),
-                ] else
-                  _kv('Events', 'Not loaded'),
+                Text(m.strategyKey, style: ts(14, w: FontWeight.w500)),
+                _kv('Run', m.runId),
+                _kv('Candles', _fileName(s.candlesPath)),
+                _kv('Chart range', '${fmtDate(c.t[0])} → ${fmtDate(c.t[c.length - 1])}'),
+                _kv('M1 bars', fmtInt(c.length)),
+                _kv('Trades', fmtInt(s.run!.trades.length)),
+                _kv('Drawing events', fmtInt(s.run!.data.drawings.length)),
               ]),
             )
           else
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(border: Border.all(color: C.line), borderRadius: BorderRadius.circular(12)),
-              child: Text('No dataset loaded', style: ts(12, color: C.mute)),
+              child: Text('No run open', style: ts(12, color: C.mute)),
             ),
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: PillButton(label: 'Load candles', icon: AppIcons.upload, fontSize: 12, enabled: s.busy == null, onTap: s.pickCandles)))),
-            const SizedBox(width: 6),
-            Expanded(child: Center(child: FittedBox(fit: BoxFit.scaleDown, child: PillButton(label: 'Load events', icon: AppIcons.upload, fontSize: 12, enabled: s.busy == null, onTap: s.pickEvents)))),
-          ]),
           const SizedBox(height: 22),
-          const SectionLabel('Tools'),
+          const SectionLabel('Layers'),
           const SizedBox(height: 6),
           for (final l in chartLayers)
             Opacity(
-              opacity: l.available ? 1 : 0.45,
+              opacity: l.available(s) ? 1 : 0.45,
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                 child: Row(children: [
@@ -141,45 +132,53 @@ class ExpandedRail extends StatelessWidget {
                       Text(l.description, style: ts(11, color: C.mute)),
                     ]),
                   ),
-                  PillSwitch(value: l.available && s.layersOn.contains(l.id), enabled: l.available, onChanged: (_) => s.toggleLayer(l.id)),
+                  PillSwitch(value: l.available(s) && s.layersOn.contains(l.id), enabled: l.available(s), onChanged: (_) => s.toggleLayer(l.id)),
                 ]),
               ),
             ),
-          const SizedBox(height: 18),
-          const SectionLabel('FVG study display'),
-          const SizedBox(height: 6),
-          _StepperRow(
-            label: 'Bounce target K',
-            unit: '× gap beyond entry edge',
-            value: s.k.toStringAsFixed(2),
-            onDec: () => s.setK(s.k - 0.25),
-            onInc: () => s.setK(s.k + 0.25),
+          Row(children: [
+            Expanded(child: Text(s.events.isEmpty ? 'No FVG events loaded' : '${fmtInt(s.events.length)} events · ${_fileName(s.eventsPath)}', overflow: TextOverflow.ellipsis, style: ts(11, color: C.mute))),
+            if (s.events.isNotEmpty) PillButton(label: 'Clear', height: 26, fontSize: 11, onTap: s.clearEvents),
+            const SizedBox(width: 6),
+            PillButton(label: 'Load events', icon: AppIcons.upload, height: 26, fontSize: 11, enabled: s.busy == null, onTap: s.pickEvents),
+          ]),
+          const SizedBox(height: 22),
+          const SectionLabel('Engine'),
+          const SizedBox(height: 8),
+          Row(children: [
+            Container(width: 7, height: 7, decoration: BoxDecoration(color: engineColor(lab.engine.status), shape: BoxShape.circle)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(lab.engine.message ?? engineLabel(lab), style: ts(11.5, color: C.mute, height: 1.35))),
+          ]),
+          const SizedBox(height: 8),
+          FormRow(label: 'Repository', labelWidth: 78, child: _PathField(value: lab.settings.engineRepo, hint: '/path/to/hummer-engine', onSubmit: (v) => lab.setEnginePaths(repo: v))),
+          FormRow(
+            label: 'Binary',
+            labelWidth: 78,
+            sub: 'Empty: <repository>/build/release/hummer. Press Enter to apply.',
+            child: _PathField(value: lab.settings.engineBinary, hint: 'build/release/hummer', onSubmit: (v) => lab.setEnginePaths(binary: v)),
           ),
-          _StepperRow(
-            label: 'Fail buffer',
-            unit: '× gap beyond far edge',
-            value: s.failBuffer.toStringAsFixed(2),
-            onDec: () => s.setFailBuffer(s.failBuffer - 0.05),
-            onInc: () => s.setFailBuffer(s.failBuffer + 0.05),
-          ),
           const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              'Display only. These move the target and fail lines on the chart. Outcomes and stats come from the Python study, so re-run it and reload to change them.',
-              style: ts(11, color: C.mute, height: 1.4),
+          Row(children: [
+            Expanded(child: PillButton(label: 'Restart engine', icon: AppIcons.restart, height: 30, fontSize: 12, enabled: !lab.engineBuilding, onTap: lab.restartEngine)),
+            const SizedBox(width: 6),
+            Expanded(
+              child: PillButton(
+                label: lab.engineBuilding ? 'Building…' : 'Build engine',
+                icon: AppIcons.build,
+                height: 30,
+                fontSize: 12,
+                color: (lab.freshness?.needsBuild ?? false) ? C.gold : null,
+                borderColor: (lab.freshness?.needsBuild ?? false) ? C.gold : null,
+                enabled: !lab.engineBuilding,
+                onTap: lab.buildEngine,
+              ),
             ),
-          ),
+          ]),
         ]),
       ),
     );
   }
-
-  Widget _tag(String t) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-        decoration: BoxDecoration(border: Border.all(color: C.line), borderRadius: BorderRadius.circular(999)),
-        child: Text(t, style: ts(11, color: C.mute)),
-      );
 
   Widget _kv(String k, String v) => Padding(
         padding: const EdgeInsets.only(top: 6),
@@ -191,31 +190,35 @@ class ExpandedRail extends StatelessWidget {
       );
 }
 
-class _StepperRow extends StatelessWidget {
-  const _StepperRow({required this.label, required this.unit, required this.value, required this.onDec, required this.onInc});
-  final String label, unit, value;
-  final VoidCallback onDec, onInc;
+/// Applied on Enter, so a half-typed path never restarts the engine.
+class _PathField extends StatefulWidget {
+  const _PathField({required this.value, required this.hint, required this.onSubmit});
+  final String value, hint;
+  final ValueChanged<String> onSubmit;
+  @override
+  State<_PathField> createState() => _PathFieldState();
+}
+
+class _PathFieldState extends State<_PathField> {
+  late final _c = TextEditingController(text: widget.value);
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(label, style: ts(13)),
-              const SizedBox(height: 2),
-              Text(unit, style: ts(11, color: C.mute)),
-            ]),
-          ),
-          Container(
-            height: 28,
-            decoration: BoxDecoration(border: Border.all(color: C.line), borderRadius: BorderRadius.circular(999)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              RoundIconButton(icon: AppIcons.minus, size: 26, iconSize: 14, color: C.mute, onTap: onDec),
-              SizedBox(width: 38, child: Text(value, textAlign: TextAlign.center, style: ts(12))),
-              RoundIconButton(icon: AppIcons.plus, size: 26, iconSize: 14, color: C.mute, onTap: onInc),
-            ]),
-          ),
-        ]),
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+        height: 30,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(color: C.bg, border: Border.all(color: C.line), borderRadius: BorderRadius.circular(999)),
+        child: TextField(
+          controller: _c,
+          onSubmitted: widget.onSubmit,
+          style: ts(11.5),
+          decoration: InputDecoration.collapsed(hintText: widget.hint, hintStyle: ts(11.5, color: C.mute)),
+        ),
       );
 }

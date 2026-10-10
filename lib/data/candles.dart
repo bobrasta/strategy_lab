@@ -22,14 +22,14 @@ int tfMinutes(String tf) => switch (tf) {
 
 String _p2(int v) => v.toString().padLeft(2, '0');
 
-/// Same text format as the downloader: 2021-01-03 23:00:00
+/// Same text format as the downloader and the engine: 2021-01-03 23:00:00
 String formatKey(int ms) {
   final t = DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true);
   return '${t.year}-${_p2(t.month)}-${_p2(t.day)} ${_p2(t.hour)}:${_p2(t.minute)}:${_p2(t.second)}';
 }
 
-/// Columnar OHLCV series (UTC). Columns keep 1.8M M1 rows cheap to hold and
-/// to send between isolates.
+/// Columnar OHLCV series (UTC). Columns keep 2M M1 rows cheap to hold and
+/// to send between isolates (no per-bar objects or strings).
 class Candles {
   Candles({
     required this.minutes,
@@ -39,7 +39,6 @@ class Candles {
     required this.l,
     required this.c,
     required this.v,
-    required this.keys,
   });
 
   final int minutes;
@@ -48,24 +47,13 @@ class Candles {
   final Int64List t;
   final Float64List o, h, l, c, v;
 
-  /// Exact time text per bar (as written in the file, or formatKey for resampled bars).
-  /// Events are matched to bars by exact string equality on these.
-  final List<String> keys;
-  Map<String, int>? _index;
-
   String get tf => tfLabel(minutes);
   int get length => t.length;
   DateTime time(int i) => DateTime.fromMillisecondsSinceEpoch(t[i], isUtc: true);
+  String key(int i) => formatKey(t[i]);
 
-  Map<String, int> get index {
-    final m = _index;
-    if (m != null) return m;
-    final built = <String, int>{};
-    for (var i = 0; i < keys.length; i++) {
-      built[keys[i]] = i;
-    }
-    return _index = built;
-  }
+  /// Last instant of bar [i]: the engine's last tick of a bar is at +59 s of its last M1 bar.
+  int endMs(int i) => t[i] + minutes * 60000 - 1000;
 
   /// First bar with time >= [ms].
   int lowerBound(int ms) {
@@ -80,4 +68,26 @@ class Candles {
     }
     return lo;
   }
+
+  /// The bar whose bucket holds [ms] (the last bar opening at or before it), or -1.
+  int barAt(int ms) => lowerBound(ms + 1) - 1;
+
+  /// Index of the bar opening exactly at [ms], or null.
+  int? indexOf(int ms) {
+    final i = lowerBound(ms);
+    return i < t.length && t[i] == ms ? i : null;
+  }
+
+  /// Bars [0, end) as views on the same buffers (no copy).
+  Candles head(int end) => end >= length
+      ? this
+      : Candles(
+          minutes: minutes,
+          t: Int64List.sublistView(t, 0, end),
+          o: Float64List.sublistView(o, 0, end),
+          h: Float64List.sublistView(h, 0, end),
+          l: Float64List.sublistView(l, 0, end),
+          c: Float64List.sublistView(c, 0, end),
+          v: Float64List.sublistView(v, 0, end),
+        );
 }

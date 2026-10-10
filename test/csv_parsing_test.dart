@@ -1,26 +1,26 @@
-import 'package:backy/data/events.dart';
-import 'package:backy/data/loaders.dart';
+import 'package:strategy_lab/data/events.dart';
+import 'package:strategy_lab/data/loaders.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
 
 void main() {
   group('candles CSV', () {
-    test('parses downloader format, keeps exact time text, detects timeframe', () {
+    test('parses downloader format, detects timeframe', () {
       final c = parseCandlesFile(writeTemp('c.csv', candlesCsv(10, ohlc: {3: [1, 2, 0.5, 1.5]})));
       expect(c.length, 10);
       expect(c.minutes, 15);
       expect(c.tf, 'M15');
-      expect(c.keys.first, '2022-03-01 00:00:00');
-      expect(c.keys[3], '2022-03-01 00:45:00');
+      expect(c.key(0), '2022-03-01 00:00:00');
+      expect(c.key(3), '2022-03-01 00:45:00');
       expect([c.o[3], c.h[3], c.l[3], c.c[3]], [1, 2, 0.5, 1.5]);
       expect(c.time(1), DateTime.utc(2022, 3, 1, 0, 15));
-      expect(c.index['2022-03-01 00:30:00'], 2);
+      expect(c.indexOf(DateTime.utc(2022, 3, 1, 0, 30).millisecondsSinceEpoch), 2);
     });
 
     test('accepts a BOM and quoted fields', () {
       final c = parseCandlesFile(writeTemp('c.csv', '﻿"time","open","high","low","close","volume"\n"2022-03-01 00:00:00",1,2,0.5,1.5,3\n'));
-      expect(c.keys.single, '2022-03-01 00:00:00');
+      expect(c.key(0), '2022-03-01 00:00:00');
       expect(c.v.single, 3);
     });
 
@@ -29,7 +29,7 @@ void main() {
       expect(() => parseCandlesFile(writeTemp('c.csv', 'time,open,high\n2022-03-01 00:00:00,1,2\n')),
           throwsA(isA<LoadError>().having((e) => e.message, 'm', contains('missing low, close'))));
       expect(() => parseCandlesFile(writeTemp('c.csv', '$eventsHeader\n2022-03-01 01:00:00,x\n')),
-          throwsA(isA<LoadError>().having((e) => e.message, 'm', contains('events file'))));
+          throwsA(isA<LoadError>().having((e) => e.message, 'm', contains('FVG events file'))));
       final backwards = 'time,open,high,low,close\n2022-03-01 00:15:00,1,1,1,1\n2022-03-01 00:00:00,1,1,1,1\n';
       expect(() => parseCandlesFile(writeTemp('c.csv', backwards)),
           throwsA(isA<LoadError>().having((e) => e.message, 'm', contains('backwards or repeat'))));
@@ -86,12 +86,14 @@ void main() {
   });
 
   group('real study files', () {
-    test('M15 candles: 118,191 bars', () {
-      final c = parseCandlesFile(fx(kM15));
-      expect(c.length, 118191);
-      expect(c.tf, 'M15');
-      expect(c.keys.first, '2021-01-03 23:00:00');
-    }, skip: skipUnlessFxdata([kM15]));
+    test('M1 candles: 2,044,519 bars, first and last as in the file', () {
+      final c = parseCandlesFile(fx(kM1));
+      expect(c.length, 2044519);
+      expect(c.tf, 'M1');
+      expect(c.key(0), '2021-01-03 23:00:00');
+      expect(c.o[0], 1904.998);
+      expect(c.key(c.length - 1), '2026-10-07 23:59:00');
+    }, skip: skipUnlessFxdata([kM1]), timeout: const Timeout(Duration(minutes: 2)));
 
     test('fvg_events.csv and fvg_events_app.csv: 18,359 rows each, nothing skipped', () {
       final a = parseEventsFile(fx('fvg_events.csv')), b = parseEventsFile(fx('fvg_events_app.csv'));

@@ -3,39 +3,39 @@ import 'dart:typed_data';
 import 'candles.dart';
 
 /// Buckets by UTC time: open first, high max, low min, close last, volume sum.
-/// Runs inside an isolate.
+/// M5/M15/H1 are UTC-aligned in the engine too (SPEC §7.3). Runs inside an isolate.
 Candles resample(Candles src, int minutes) {
-  final b = minutes * 60000;
-  final t = <int>[], keys = <String>[];
-  final o = <double>[], h = <double>[], l = <double>[], c = <double>[], v = <double>[];
-  var cur = -1 << 62;
-  for (var i = 0; i < src.length; i++) {
+  final b = minutes * 60000, n = src.length;
+  // At most one output bar per input bar; trimmed at the end.
+  final t = Int64List(n);
+  final o = Float64List(n), h = Float64List(n), l = Float64List(n), c = Float64List(n), v = Float64List(n);
+  var j = -1, cur = -1 << 62;
+  for (var i = 0; i < n; i++) {
     final k = src.t[i] - src.t[i] % b;
     if (k != cur) {
       cur = k;
-      t.add(k);
-      keys.add(formatKey(k));
-      o.add(src.o[i]);
-      h.add(src.h[i]);
-      l.add(src.l[i]);
-      c.add(src.c[i]);
-      v.add(src.v[i]);
+      j++;
+      t[j] = k;
+      o[j] = src.o[i];
+      h[j] = src.h[i];
+      l[j] = src.l[i];
+      c[j] = src.c[i];
+      v[j] = src.v[i];
     } else {
-      final j = t.length - 1;
       if (src.h[i] > h[j]) h[j] = src.h[i];
       if (src.l[i] < l[j]) l[j] = src.l[i];
       c[j] = src.c[i];
       v[j] += src.v[i];
     }
   }
+  final m = j + 1;
   return Candles(
     minutes: minutes,
-    t: Int64List.fromList(t),
-    o: Float64List.fromList(o),
-    h: Float64List.fromList(h),
-    l: Float64List.fromList(l),
-    c: Float64List.fromList(c),
-    v: Float64List.fromList(v),
-    keys: keys,
+    t: t.sublist(0, m),
+    o: o.sublist(0, m),
+    h: h.sublist(0, m),
+    l: l.sublist(0, m),
+    c: c.sublist(0, m),
+    v: v.sublist(0, m),
   );
 }

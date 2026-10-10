@@ -2,47 +2,46 @@
 
 ## Done
 
-- **Step 0.** Imported the FVG Lab design export (conditional-study version, `~/Downloads/New Folder (3)/flutter/fvg_lab`) into this project. Kept backy's `linux/` runner (1440×900, title "FVG Lab"), added `file_selector` + `path_provider`.
-- **Python (fxdata, not a git repo; pre-edit copy kept outside fxdata).** `fvg_conditions.py` now also writes, on every non-`--control` run:
-  - `fvg_events_app.csv`: every line of `fvg_events.csv` unchanged, plus `disp_q, trend, age_b, form_session, touch_session, sweep_b, period`, joined on (time, dir). It exits if the join or outcomes disagree.
-  - `fvg_fake_events.csv` and `fvg_control_events.csv` (control = real + fake rows from the shuffled-bars run, `kind` column). Per-event files, so the app can apply any filter combination.
-  - `fvg_conditions_summary.json`: per period (`in`, `out`, plus `holdout` only with `--holdout`) and bucket, it holds real/fake/control rates, n, diff_pp, z, context_pp, control_diff_pp, control_z and the verdict.
-  - The control pass runs silently in-process (same seed). Its rows equal a real `--control` run's.
-  - Printed tables are byte-identical for `--control`, default and `--confirm`. The only addition is a final "Saved …" line.
-  - `max_wick` was added as a column of `fvg_condition_events*.csv`, needed for the fake-zone depth curve. No statistic changed.
-  - `fvg_study.py` and `fvg_baseline.py` were not touched.
-- **Steps 1–2.** Loading prefers `fvg_events_app.csv`, accepts the Python column names and validates `kind`. `fvg_conditions_summary.json` is cross-checked bucket by bucket on load, and a mismatch shows a notice. The last folder is remembered. The comparison card and verdict follow `fvg_conditions.py`.
-- **Steps 3–5.** These were already correct in the design. The zone "outcome known" rule was extracted for testing. Tests cover the zone colour, counters, events table, autoscale, Predict, Next touch, 100 bars/s batching and the export fields.
-- **Steps 6–7.** Tests cover bookmarks and resampling. The real M1 file resampled to M15 equals the M15 file on every sampled bar (Δ = 0).
-- `--dart-define=CANDLES=… EVENTS=…` opens files at startup.
-- Review fixes: clean-bounce histogram (bounce_inside_gap only, study's bins, 0.0–1.0; all ten bucket counts equal pandas, n = 6,019); zone labels off by default, shown for selected + hovered zone as "Bounce · wick 0.44"; non-selected zones at 35%; "Selected only" toggle; condition filters moved to a Filters popover with count badge (top bar fits at 1920 px). Age, Sweep, Period filters, the Asia preset and the hold-out lock were already in the design; now covered by `test/review_fixes_test.dart`.
-- Chart navigation: drag (time + price), two-finger touchpad up/down = zoom and left/right = scroll (axis locked per swipe, pinch zooms too), wheel = zoom, Shift+wheel = scroll, price-axis drag = candle height, double-click axis / Fit = autoscale. Tests in `test/chart_gestures_test.dart`.
+### M6 B: Strategy Lab (2026-10-10)
+- **Rename** from FVG Lab: package `strategy_lab`, binary `strategy_lab`, app id `com.example.strategy_lab`, title "Strategy Lab". The FVG-study panels (stats, comparison card, events table, predict mode, bookmarks, drill-down, sample presets) are removed; the FVG zones stay as an optional overlay layer.
+- **Engine service:** `EngineService` launches `hummer serve` from the engine repo (setting; default `/home/bob/projects/hummer-engine`, binary `build/release/hummer`), checks protocol 1, shows starting / ready / error. Build engine when the binary is missing or older than `engine/ cli/ sdk/ CMakeLists.txt`; Restart engine. Exit: `shutdown`, 2 s, SIGKILL.
+- **Tester:** strategies with built / stale / not-built status (polled every 4 s, so an edited source shows stale and can be rebuilt without restarting), Build with streamed compiler output, inputs form from the schema (int/double/string fields, bool switch, timeframe and choice menus; values checked against min/max; only non-default values are sent), data file, dates, tick path, ambiguity, deposit, leverage, cost overrides, Start/Stop with progress. Failed runs show "Run failed" with signal or exit code and the journal/stderr tails.
+- **Results:** report (all run.json summary fields), graph, trades, deals, journal, history, build log. Compare two runs.
+- **Hold-out protection** (user requirement 1): per-strategy protected period in settings, `fvg_continuation` from 2024-01-01 by default; confirmation dialog before an overlapping run; `protected_period_confirmation.json` (UTC timestamp, period, kind start/reveal, run dates) in the run folder; unconfirmed overlapping runs are masked everywhere and need a logged reveal to open.
+- **Run history** (2): scans `runs/*/run.json` in an isolate; reopen, replay, compare without re-running.
+- **Large files** (3): `equity.csv` is scanned once in an isolate (8 MB chunks) into a 512-row block index and ~3,000 graph buckets; replay reads the ~50 KB block around the cursor (LRU of 8). Candles (2M M1 rows) are parsed byte-level in an isolate and cached as a binary file; all chart timeframes are resampled in the same isolate (nothing large is copied between isolates).
+- **Settings persistence** (4): `settings.json` in the app support folder, debounced atomic writes.
+- **Engine change** for rule "nothing recomputed in Dart": `equity.csv` gained `profit` (equity − balance), `drawdown` and `drawdown_pct` (deepest tick-level drawdown in the interval); see the engine's NOTES.
+- **Desktop entry:** `linux/packaging/strategy-lab.desktop` + `.svg` icon; `install.sh` (and `--uninstall`).
 
 ## Verified
 
-- `flutter analyze`: no issues. `flutter test`: 49 passing (real-data tests read `FXDATA_DIR`, skip if missing).
-- Parity: 18,359 events · bounce 0.579 · P(bounce | d=0.5) 0.481 · in-sample Asia formation +3.39pp, candidate (control run +0.71pp). Every bucket in the JSON matches.
-- Real app (`flutter run -d linux`, M1 and M15 files): everything loads, 0 unmatched events, replay ~100 bars/s.
-- UI-isolate stalls in profile mode: M15 load 19 ms, M1 load 85 ms. Once at the end of events loading there's ~180 ms (first filter pass over ~170k real/fake/control events). Debug builds are 2–4× slower.
+- `flutter analyze`: no issues. `flutter test`: 56 passing (fast parsers bit-identical to `double.parse` on 200k values; equity store vs a linear scan across block boundaries; replay rules bar by bar on a hand-made run; protected periods; settings round-trip; app = CLI trades from a real engine run; widgets at 1440×900 and 1920×1037).
+- Acceptance against the real engine (`integration_test/`): build fvg_continuation, run 2021-01-01..2023-12-31, open, replay a trade; To = 2024-03-31 → Start shows the protected-period dialog, Cancel starts nothing; restart (new process, same settings) → settings remembered, the run reopens from History and replays; `pgrep hummer` empty after each.
+- `kill -9` of a worker mid-run → "Run failed · SIGKILL", the next run works. `kill -9` of the app → the service exits (parent-death signal). Window close → `shutdown` logged, no processes left.
+- Installed with `install.sh`, launched through the desktop entry (`gtk-launch strategy-lab`): engine starts.
+
+## Measured (release / profile, Ryzen 7 PRO 5850U)
+
+| What | Result |
+|---|---|
+| Parse the 2,044,519-row M1 CSV (isolate, AOT) | 3.2 s first time; from the binary cache afterwards |
+| Scan the full-data per-M1 `equity.csv` (2,045,853 rows, 288 MB) | 3.1 s (isolate) |
+| Equity row at the cursor (block read + parse) | ~2 ms on a cache miss |
+| Full ma_cross run 2021–2026 + open, profile mode | 9.2 s; worst UI event-loop gap **65 ms** |
 
 ## Decisions
 
-- Non-selected zones are dimmed even when nothing is selected (taken literally from the review). "Selected only" with no selection shows all zones, so there's always something to click.
-- Gap size, Starred and Presets stay in the top bar (the review listed neither them to move nor to keep); everything fits at 1920 px.
-
-- Touchpad direction: fingers up = zoom in (like wheel up). If it feels inverted with your natural-scrolling setting, flip `_zoomPerPx` in `price_chart.dart`.
-- Chart drag is limited to mouse/touch devices; touchpad two-finger gestures go to the Listener (Flutter's drag recognizer would otherwise claim them). `PointerPanZoomUpdateEvent.localPan` is offset by the widget's position, so the axis lock uses the global `pan`.
-
-- Control semantics (user's choice): the control run's own real − fake, not a pooled "control" group. Candidate = real − fake z ≥ 2 and control z < 2; artifact = control z ≥ 2; min 30 resolved per group.
-- 2024–25 out-of-sample is shown (user has run `--confirm`). The 2026 hold-out stays locked behind the design's reveal step.
-- `fvg_baseline.py` JSON dropped (user's choice). The baseline JSON is still read if present, as a fallback for the faint curve.
-- The stats drawer during replay shows full-sample stats, as in the design (they're study-level numbers, not tied to the cursor).
-- `deprecated_member_use` is ignored in `analysis_options.yaml` (the design uses `Color.withOpacity` throughout).
-- Geist isn't bundled, so the system falls back to Noto Sans, which is wider. The rail's two load pills use `FittedBox(scaleDown)` instead of overflowing by ~7 px.
-- Tried and reverted (no effect on stalls): packing M1 time keys into one string, and sending only numeric columns to the resample isolate. The M1 stall comes from the parse isolate's allocations; isolates share one heap.
+- Results drawer at the bottom (MT5 tester tabs), Tester settings in the right drawer, both overlaying the chart as the FVG Lab drawers did.
+- The trades layer draws the **initial** SL/TP: later modifications are only known from `sl_final`/`tp_final` at the exit, so drawing them earlier would leak the future.
+- Report fields that MT5 shows as percentages but the engine doesn't write (long/short won %) are shown as counts. Compare has no difference column.
+- Graph buckets are min/max picks of rows parsed to plotting precision; every number shown as text (hover, readouts) is an exact row read with `double.parse`-identical parsing.
+- A confirmation covers only the period it was made for; changing a strategy's protected period asks again. Weakening or removing a protection asks once more.
+- History reads `runs/` directly (not `list_runs`), so it works while the engine is down.
+- Chart candles stop at the run's last simulated bar; bars after the run are never shown with it.
+- Integration tests run in debug mode, where JIT warm-up adds UI pauses; the stall budget is checked in profile mode (`flutter drive --profile`).
 
 ## Left / ideas
 
-- If the 180 ms post-load stall matters: precompute per-event filter keys, or run the first `_applyFilters` incrementally.
 - Bundle Geist (`assets/fonts/`) to match the design's typography.
-- When 2026 data arrives: re-run `fvg_study.py` then `fvg_conditions.py`. The `period` column marks it `holdout`, and the app keeps it locked.
+- Graph zoom (a time range) and a per-deal x-axis like MT5's.

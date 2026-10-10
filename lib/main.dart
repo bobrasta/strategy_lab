@@ -1,43 +1,63 @@
+import 'dart:io';
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'screens/lab_screen.dart';
 import 'state/app_state.dart';
+import 'state/lab_state.dart';
+import 'state/settings.dart';
 import 'theme.dart';
 
-/// Run with `flutter run -d linux --dart-define=PRESET=3` to open a demo state on
-/// the bundled sample data: 1 explore · 2 explore + drawers · 3 replay ·
-/// 4 replay predict · 5 empty (default; load your own files).
-/// `--dart-define=CANDLES=<csv> --dart-define=EVENTS=<csv>` opens those files at startup.
+/// Strategy Lab: starts `hummer serve`, runs backtests through it and replays their output files.
+/// Settings live in the app support folder (settings.json); the parsed-candle cache in the cache folder.
+/// `--dart-define=SETTINGS_DIR=<dir>` keeps settings.json there instead (tests, a second profile).
 Future<void> main() async {
-  const preset = int.fromEnvironment('PRESET', defaultValue: 5);
-  const candles = String.fromEnvironment('CANDLES'), events = String.fromEnvironment('EVENTS');
-  final state = AppState()..applyPreset(preset);
-  runApp(FvgLabApp(state: state));
-  await state.restorePrefs();
-  if (candles.isNotEmpty) await state.loadCandles(candles);
-  if (events.isNotEmpty) await state.loadEvents(events);
+  WidgetsFlutterBinding.ensureInitialized();
+  final lab = await createLab();
+  runApp(StrategyLabApp(lab: lab));
+  await lab.init();
 }
 
-class FvgLabApp extends StatefulWidget {
-  const FvgLabApp({super.key, required this.state});
-  final AppState state;
+Future<LabState> createLab({String? settingsDir}) async {
+  const override = String.fromEnvironment('SETTINGS_DIR');
+  final dir = settingsDir ?? (override.isNotEmpty ? override : (await getApplicationSupportDirectory()).path);
+  final cache = await getApplicationCacheDirectory();
+  final settings = await Settings.load(File('$dir${Platform.pathSeparator}settings.json'));
+  return LabState(chart: AppState(), settings: settings, cacheDir: cache.path);
+}
+
+class StrategyLabApp extends StatefulWidget {
+  const StrategyLabApp({super.key, required this.lab, this.manageEngine = true});
+  final LabState lab;
+
+  /// Tests that drive the app with a fake engine set this to false.
+  final bool manageEngine;
 
   @override
-  State<FvgLabApp> createState() => _FvgLabAppState();
+  State<StrategyLabApp> createState() => _StrategyLabAppState();
 }
 
-class _FvgLabAppState extends State<FvgLabApp> {
+class _StrategyLabAppState extends State<StrategyLabApp> {
+  late final AppLifecycleListener _life;
+
   @override
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_onKey);
+    // Window close: shutdown to the engine, up to 2 s, then kill (its workers die with it).
+    _life = AppLifecycleListener(onExitRequested: () async {
+      if (widget.manageEngine) await widget.lab.shutdown();
+      return AppExitResponse.exit;
+    });
   }
 
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_onKey);
-    widget.state.dispose();
+    _life.dispose();
     super.dispose();
   }
 
@@ -48,7 +68,7 @@ class _FvgLabAppState extends State<FvgLabApp> {
 
   bool _onKey(KeyEvent e) {
     if (_typing()) return false;
-    final s = widget.state;
+    final s = widget.lab.chart;
     final down = e is KeyDownEvent, repeat = e is KeyRepeatEvent;
     final k = e.logicalKey;
     final kb = HardwareKeyboard.instance;
@@ -57,7 +77,11 @@ class _FvgLabAppState extends State<FvgLabApp> {
       return true;
     }
     if (down && k == LogicalKeyboardKey.escape) {
-      s.escape();
+      if (widget.lab.compare != null) {
+        widget.lab.closeCompare();
+      } else {
+        s.escape();
+      }
       return true;
     }
     if (!s.isReplay) return false;
@@ -66,7 +90,7 @@ class _FvgLabAppState extends State<FvgLabApp> {
       return true;
     }
     if ((down || repeat) && k == LogicalKeyboardKey.arrowRight) {
-      kb.isShiftPressed ? s.nextEvent() : s.step(1);
+      kb.isShiftPressed ? s.nextTrade() : s.step(1);
       return true;
     }
     if ((down || repeat) && k == LogicalKeyboardKey.arrowLeft) {
@@ -74,7 +98,7 @@ class _FvgLabAppState extends State<FvgLabApp> {
       return true;
     }
     if (down && k == LogicalKeyboardKey.keyN) {
-      s.nextTouch();
+      s.nextTrade();
       return true;
     }
     return false;
@@ -82,9 +106,9 @@ class _FvgLabAppState extends State<FvgLabApp> {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'FVG Lab',
+        title: 'Strategy Lab',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
-        home: LabScreen(state: widget.state),
+        home: LabScreen(lab: widget.lab),
       );
 }

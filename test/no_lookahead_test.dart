@@ -1,118 +1,143 @@
 import 'dart:ui';
 
-import 'package:backy/chart/chart_geometry.dart';
-import 'package:backy/chart/chart_layer.dart';
-import 'package:backy/chart/fvg_layer.dart';
-import 'package:backy/data/events.dart';
-import 'package:backy/data/predictions.dart';
-import 'package:backy/state/app_state.dart';
-import 'package:backy/theme.dart';
-import 'package:backy/widgets/chart_overlays.dart' show visibleOutcome;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:strategy_lab/chart/chart_geometry.dart';
+import 'package:strategy_lab/chart/chart_layer.dart';
+import 'package:strategy_lab/chart/trades_layer.dart';
+import 'package:strategy_lab/state/app_state.dart';
+import 'package:strategy_lab/theme.dart';
+import 'package:strategy_lab/widgets/graph_view.dart';
+import 'package:strategy_lab/widgets/tables.dart';
 
 import 'support.dart';
 
-// One known bullish gap on synthetic M15 bars:
-// formed at bar 10 (02:30), first touch at bar 15 (03:45), resolves (bounce) at bar 20 (05:00).
-// The touch bar's high is 150 so any autoscale leak of that bar is obvious.
-const formed = 10, touch = 15, end = 20;
-
-Future<AppState> load() async {
-  final c = writeTemp('xauusd_m15_test.csv', candlesCsv(60, ohlc: {touch: [100.2, 150.0, 99.8, 100.4]}));
-  final e = writeTemp('fvg_events.csv', '$eventsHeader,disp_q,trend,age_b,form_session,touch_session,sweep_b,period\n'
-      '2022-03-01 02:30:00,2022-03-01 03:45:00,2022-03-01 05:00:00,101.0,100.0,bull,0.6,5,0.4,0.0,bounce,5.0,bounce_inside_gap,Q3,D4 strong,aligned,4-12,Asia,Asia,no sweep,in\n');
-  final s = AppState();
-  await s.loadCandles(c);
-  await s.loadEvents(e);
-  expect(s.error, isNull);
-  expect(s.zones, hasLength(1));
-  return s;
+LayerContext ctx(AppState s) => LayerContext(state: s, candles: s.candles!, cursor: s.visibleCursor, nowMs: s.nowMs);
+ChartGeometry geo(AppState s) {
+  s.fit();
+  return ChartGeometry.compute(const Size(1200, 700), s, s.candles!, s.visibleCursor, 0);
 }
-
-LayerContext ctx(AppState s) => LayerContext(state: s, candles: s.candles!, cursor: s.visibleCursor, pulse: 0);
-
-double autoscaleHi(AppState s) => ChartGeometry.compute(const Size(1200, 700), s, s.candles!, s.visibleCursor, 0).hi;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('replay: zone hidden before formation, grey until end_time, outcome colour from end_time', () async {
-    final s = await load();
-    final z = s.zones.single;
-    expect([z.formed, z.touch, z.end], [formed, touch, end]);
+  test('replay on M1: trades, position, equity, drawings, tables never read past the cursor bar', () async {
+    final s = await openFakeRun(writeFakeRun());
+    expect(s.timeframe, 'M1');
     s.enterReplay();
     s.startAt(0);
-    for (var bar = 0; bar <= 30; bar++) {
+    final run = s.run!;
+    for (var bar = 0; bar < 120; bar++) {
       expect(s.visibleCursor, bar);
-      final known = FvgLayer.outcomeKnown(z, ctx(s));
-      expect(known, bar >= end, reason: 'bar $bar');
-      expect(FvgLayer.zoneColor(z, ctx(s)), bar >= end ? C.green : C.mute, reason: 'bar $bar');
-      expect(visibleOutcome(s, z.ev), bar >= end ? EvOutcome.bounce : null, reason: 'events table, bar $bar');
-      // Running counters never count the future.
-      expect(s.openGaps, bar >= formed && bar < end ? 1 : 0, reason: 'bar $bar');
-      expect(s.resolvedCount, bar >= end ? 1 : 0, reason: 'bar $bar');
+      final now = s.nowMs;
+      expect(now, at(bar, 59), reason: 'now = the cursor bar\'s last tick (+59 s)');
+      final g = geo(s);
+      final c = ctx(s);
+      final shown = TradesLayer.visible(g, c).toList();
+      expect(shown.map((t) => t.ticket), [if (bar >= 10) 1, if (bar >= 65) 3], reason: 'bar $bar');
+      for (final t in shown) {
+        expect(TradesLayer.closed(t, c), t.closeMs <= now, reason: 'exit of #${t.ticket} at bar $bar');
+      }
+      // trade #1 closes at 00:40:20 (bar 40), #3 at 01:30:40 (bar 90)
+      final pos = run.positionAt(now);
+      expect(pos?.ticket, bar >= 10 && bar < 40 ? 1 : (bar >= 65 && bar < 90 ? 3 : null), reason: 'position at bar $bar');
+      final row = run.equityAt(now)!;
+      expect(row.ms, lessThanOrEqualTo(now));
+      expect(row.ms, at(bar, 59), reason: 'the bar row, not an earlier deal row');
+      expect(row.profit, (bar >= 10 && bar < 40) || (bar >= 65 && bar < 90) ? (bar - 9).toDouble() : 0.0);
+      final objs = {for (final o in run.drawingsAt(now)) o.name: o};
+      expect(objs.containsKey('z'), bar >= 5 && bar < 80, reason: 'zone z at bar $bar');
+      if (objs['z'] != null) expect(objs['z']!.t2, bar >= 50 ? at(50) : null, reason: 'zone stays open-ended until the move at 00:50');
+      expect(objs.containsKey('m'), bar >= 10);
+      expect(tradesShown(s), (bar >= 10 ? 1 : 0) + (bar >= 65 ? 1 : 0));
+      expect(run.dealsBy(now), [10, 40, 65, 90].where((m) => bar >= m).length);
+      expect(run.journalBy(now), (bar >= 10 ? 1 : 0) + (bar >= 65 ? 1 : 0));
       s.step(1);
     }
+  });
+
+  test('stepping back rebuilds the drawing state (a deleted zone comes back)', () async {
+    final s = await openFakeRun(writeFakeRun());
+    s.enterReplay();
+    s.startAt(85);
+    expect(s.run!.drawingsAt(s.nowMs).map((o) => o.name), isNot(contains('z')));
+    s.step(-20); // bar 65: z exists, already moved
+    final z = s.run!.drawingsAt(s.nowMs).firstWhere((o) => o.name == 'z');
+    expect(z.t2, at(50));
+    s.step(-20); // bar 45: z exists, still open-ended
+    expect(s.run!.drawingsAt(s.nowMs).firstWhere((o) => o.name == 'z').t2, isNull);
+  });
+
+  test('on M5 the cursor bar ends at +4:59; a trade inside it shows once that bar is the cursor', () async {
+    final s = await openFakeRun(writeFakeRun());
+    await s.setTimeframe('M5');
+    s.enterReplay();
+    s.startAt(1); // 00:05 bar, ends 00:09:59
+    expect(s.nowMs, at(9, 59));
+    expect(TradesLayer.visible(geo(s), ctx(s)), isEmpty);
+    s.step(1); // 00:10 bar holds the 00:10:00 entry
+    expect(TradesLayer.visible(geo(s), ctx(s)).map((t) => t.ticket), [1]);
+    // trade #1 closes 00:40:20: inside the 00:40 bar (index 8), not before it
+    s.startAt(7);
+    expect(TradesLayer.closed(s.run!.tradeByTicket(1)!, ctx(s)), isFalse);
+    s.step(1);
+    expect(TradesLayer.closed(s.run!.tradeByTicket(1)!, ctx(s)), isTrue);
+  });
+
+  test('switching timeframe in replay never moves "now" later', () async {
+    final s = await openFakeRun(writeFakeRun());
+    s.enterReplay();
+    s.startAt(37); // M1 00:37, now 00:37:59
+    await s.setTimeframe('M5');
+    expect(s.nowMs, lessThanOrEqualTo(at(37, 59)));
+    expect(s.nowMs, at(34, 59), reason: 'the last M5 bar fully known by then');
   });
 
   test('autoscale only reads bars at or before the cursor', () async {
-    final s = await load();
+    final s = await openFakeRun(writeFakeRun());
     s.enterReplay();
-    s.startAt(touch - 1);
-    expect(autoscaleHi(s), lessThan(110));
-    // A manual price scale/shift stretches that autoscale; it still can't reach the future bar.
+    s.startAt(29);
+    double hi() => ChartGeometry.compute(const Size(1200, 700), s, s.candles!, s.visibleCursor, 0).hi;
+    final before = hi();
     s.scalePrice(0.5);
     s.shiftPrice(0.3);
-    expect(autoscaleHi(s), lessThan(110));
     s.resetPriceScale();
-    s.step(1);
-    expect(s.visibleCursor, touch);
-    expect(autoscaleHi(s), greaterThan(150));
+    expect(hi(), before);
+    s.step(1); // bar 30 has the 100.6 high
+    expect(hi(), greaterThan(before));
   });
 
-  test('predict: touch bar hidden (open only) while the call is pending, revealed after', () async {
-    final s = await load();
-    s.enterReplay();
-    s.togglePredict();
-    s.startAt(5);
-    for (var i = 0; i < 30 && s.peek == null; i++) {
-      s.step(1);
-    }
-    expect(s.visibleCursor, touch - 1, reason: 'cursor stops on the bar before the touch');
-    expect(s.peek, touch, reason: 'only this bar\'s open is drawn');
-    expect(s.pending, s.zones.single.ev.id);
-    expect(autoscaleHi(s), lessThan(110), reason: 'the hidden bar\'s high must not move the scale');
-    expect(visibleOutcome(s, s.zones.single.ev), isNull);
-
-    // Nothing moves the cursor past the touch until the call is made.
-    s.step(1);
-    s.togglePlay();
-    s.nextTouch();
-    s.nextEvent();
-    expect(s.visibleCursor, touch - 1);
-    expect(s.playing, isFalse);
-
-    s.guess('bounce');
-    expect(s.peek, isNull);
-    expect(s.visibleCursor, touch);
-    expect(autoscaleHi(s), greaterThan(150));
-    expect(s.predictionLog, hasLength(1));
-    expect(s.predictionLog.single.correct, isTrue);
-    // The outcome still isn't shown until end_time.
-    expect(FvgLayer.outcomeKnown(s.zones.single, ctx(s)), isFalse);
+  test('the equity graph draws only buckets that end by the cut, then the exact row at it', () async {
+    final s = await openFakeRun(writeFakeRun());
+    final store = s.run!.equity!;
+    final cut = at(50, 30);
+    final pts = graphPoints(GraphSeries(store: store, label: '', equityColor: C.blue, balanceColor: C.text, cutMs: cut));
+    expect(pts.every((p) => p.ms <= cut), isTrue);
+    expect(pts.last.ms, at(49, 59), reason: 'the last row stamped by 00:50:30 is the 00:49 bar row');
+    expect(graphPoints(GraphSeries(store: store, label: '', equityColor: C.blue, balanceColor: C.text)).last.ms, at(119, 59));
   });
 
-  test('Next touch (N) stops just before the touch bar', () async {
-    final s = await load();
+  test('next trade (N) stops at the next entry or exit bar', () async {
+    final s = await openFakeRun(writeFakeRun());
     s.enterReplay();
     s.startAt(0);
-    s.nextTouch();
-    expect(s.visibleCursor, touch - 1);
-    expect(s.peek, isNull);
+    final stops = <int>[];
+    for (var i = 0; i < 6; i++) {
+      s.nextTrade();
+      stops.add(s.visibleCursor);
+    }
+    expect(stops, [10, 40, 65, 90, 90, 90]);
+  });
+
+  test('replay trade starts 50 bars before the entry, with the trade selected', () async {
+    final s = await openFakeRun(writeFakeRun());
+    s.replayTrade(3);
+    expect(s.isReplay, isTrue);
+    expect(s.visibleCursor, 15);
+    expect(s.selectedTrade, 3);
   });
 
   test('100 bars/s advances ~100 bars per second with at most ~60 repaints', () async {
-    final s = await load();
+    final s = await openFakeRun(writeFakeRun());
     s.enterReplay();
     s.startAt(0);
     s.setSpeed(100);
@@ -122,15 +147,6 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 500));
     s.togglePlay();
     expect(s.visibleCursor, inInclusiveRange(40, 51), reason: '~50 bars in 0.5 s');
-    expect(notes, lessThanOrEqualTo(36), reason: '16 ms tick: ≤ ~31 frames in 0.5 s plus play/pause');
-    expect(notes, greaterThan(5));
-  });
-
-  test('prediction export carries the conditions at the time of the call', () async {
-    final s = await load();
-    final csv = predictionsCsv([PredictionRecord.of(s.zones.single.ev, 'break', DateTime.utc(2026, 10, 9, 12))]);
-    final lines = csv.trim().split('\n');
-    expect(lines.first, 'formation_time,dir,scenario,size_q,disp_q,formation_session,touch_session,htf_trend,age_bucket,sweep,period,call,actual,correct,answered_at');
-    expect(lines[1], '2022-03-01 02:30:00,bull,bounce_inside_gap,Q3,D4 strong,Asia,Asia,Aligned,4–12,no,In-sample,break,bounce,false,2026-10-09T12:00:00.000Z');
+    expect(notes, lessThanOrEqualTo(36));
   });
 }

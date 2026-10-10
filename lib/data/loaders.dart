@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'candles.dart';
 import 'events.dart';
+import '../util/fastparse.dart';
 
 /// Shown to the user as-is.
 class LoadError implements Exception {
@@ -58,14 +59,22 @@ int? parseUtcMs(String s) {
   return DateTime.tryParse(hasZone ? s : '${s}Z')?.toUtc().millisecondsSinceEpoch;
 }
 
-/// Runs inside an isolate.
+/// Runs inside an isolate. Byte-level: the 2M-row M1 file has no per-row Strings.
 Candles parseCandlesFile(String path) {
-  final text = _readCsv(path, 'Pick the candle .csv from your downloader (time,open,high,low,close,volume).');
-  final lines = const LineSplitter().convert(text);
-  if (lines.length < 2) throw const LoadError('The candle file has no rows.');
-  final head = _header(lines.first);
+  const hint = 'Pick the M1 candle .csv (time,open,high,low,close,volume).';
+  if (!path.toLowerCase().endsWith('.csv')) throw const LoadError("That isn't a CSV file. $hint");
+  final f = File(path);
+  if (!f.existsSync()) throw LoadError('The candle file $path no longer exists.');
+  final bytes = f.readAsBytesSync();
+  final probe = min(bytes.length, 4096);
+  for (var i = 0; i < probe; i++) {
+    if (bytes[i] == 0) throw const LoadError("That file isn't plain text. $hint");
+  }
+  var nl = bytes.indexOf(10);
+  if (nl < 0) nl = bytes.length;
+  final head = _header(utf8.decode(bytes.sublist(0, nl), allowMalformed: true));
   if (head.contains('edge') && head.contains('touch_time')) {
-    throw const LoadError('This is an events file. Use Load events for fvg_events.csv, and Load candles for the price file.');
+    throw const LoadError('This is an FVG events file, not a candle file.');
   }
   const need = ['time', 'open', 'high', 'low', 'close'];
   final missing = need.where((c) => !head.contains(c)).toList();
@@ -76,30 +85,44 @@ Candles parseCandlesFile(String path) {
   final il = head.indexOf('low'), ic = head.indexOf('close'), iv = head.indexOf('volume');
   final maxCol = [it, io, ih, il, ic, iv].reduce(max);
 
-  final cap = lines.length - 1;
+  var cap = 1;
+  for (var i = nl; i < bytes.length; i++) {
+    if (bytes[i] == 10) cap++;
+  }
   final t = Int64List(cap);
   final o = Float64List(cap), h = Float64List(cap), l = Float64List(cap), c = Float64List(cap), v = Float64List(cap);
-  final keys = <String>[];
-  var k = 0;
-  for (var r = 1; r < lines.length; r++) {
-    final line = lines[r];
-    if (line.trim().isEmpty) continue;
-    final p = line.split(',');
-    if (p.length <= maxCol) continue;
-    final key = _unq(p[it]);
-    final ms = parseUtcMs(key);
-    final po = double.tryParse(p[io]), ph = double.tryParse(p[ih]), pl = double.tryParse(p[il]), pc = double.tryParse(p[ic]);
+  final line = CsvLine(), span = Int32List(2);
+  var k = 0, row = 1, ls = nl + 1;
+  int? timeAt(int col) {
+    trimField(bytes, line.start(col), line.end(col), span);
+    return parseTimeBytes(bytes, span[0], span[1]) ?? parseUtcMs(String.fromCharCodes(bytes, span[0], span[1]));
+  }
+
+  double? num(int col) {
+    trimField(bytes, line.start(col), line.end(col), span);
+    return parseDoubleBytes(bytes, span[0], span[1]);
+  }
+
+  for (var i = ls; i <= bytes.length; i++) {
+    if (i < bytes.length && bytes[i] != 10) continue;
+    final s0 = ls;
+    ls = i + 1;
+    row++;
+    if (i <= s0) continue;
+    line.split(bytes, s0, i);
+    if (line.count <= maxCol) continue;
+    final ms = timeAt(it);
+    final po = num(io), ph = num(ih), pl = num(il), pc = num(ic);
     if (ms == null || po == null || ph == null || pl == null || pc == null) continue;
     if (k > 0 && ms <= t[k - 1]) {
-      throw LoadError('Candle times go backwards or repeat at row ${r + 1} ($key). Sort the file by time and drop duplicates.');
+      throw LoadError('Candle times go backwards or repeat at row $row (${formatKey(ms)}). Sort the file by time and drop duplicates.');
     }
     t[k] = ms;
     o[k] = po;
     h[k] = ph;
     l[k] = pl;
     c[k] = pc;
-    v[k] = iv < 0 ? 0 : (double.tryParse(p[iv]) ?? 0);
-    keys.add(key);
+    v[k] = iv < 0 ? 0 : (num(iv) ?? 0);
     k++;
   }
   if (k == 0) throw const LoadError('No candle rows could be read. Times should look like 2021-01-03 23:00:00.');
@@ -109,7 +132,7 @@ Candles parseCandlesFile(String path) {
     diffs.add(t[i] - t[i - 1]);
   }
   diffs.sort();
-  final minutes = diffs.isEmpty ? 15 : (diffs[diffs.length ~/ 2] / 60000).round().clamp(1, 1440).toInt();
+  final minutes = diffs.isEmpty ? 1 : (diffs[diffs.length ~/ 2] / 60000).round().clamp(1, 1440).toInt();
   return Candles(
     minutes: minutes,
     t: t.sublist(0, k),
@@ -118,7 +141,6 @@ Candles parseCandlesFile(String path) {
     l: l.sublist(0, k),
     c: c.sublist(0, k),
     v: v.sublist(0, k),
-    keys: keys,
   );
 }
 
@@ -134,7 +156,7 @@ EventsParse parseEventsFile(String path, {bool companion = false}) {
   if (lines.length < 2) throw LoadError('$name has no rows.');
   final head = _header(lines.first);
   if (head.contains('open') && !head.contains('edge') && !head.contains('outcome')) {
-    throw const LoadError('This is a candle file. Use Load candles for it, and Load events for fvg_events.csv.');
+    throw const LoadError('This is a candle file. Pick fvg_events.csv from the FVG study instead.');
   }
   final need = companion
       ? const ['time', 'dir', 'outcome']

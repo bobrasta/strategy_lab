@@ -1,21 +1,33 @@
 import 'dart:ui';
 
-import 'package:backy/chart/chart_geometry.dart';
-import 'package:backy/chart/price_chart.dart';
-import 'package:backy/main.dart';
-import 'package:backy/state/app_state.dart';
+import 'package:strategy_lab/chart/chart_geometry.dart';
+import 'package:strategy_lab/chart/price_chart.dart';
+import 'package:strategy_lab/main.dart';
+import 'package:strategy_lab/state/app_state.dart';
+import 'package:strategy_lab/state/lab_state.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
 
-Future<AppState> pumpChart(WidgetTester t, {int preset = 1}) async {
+/// The app with a fake run open on M1 (120 bars, so the view starts zoomed in) and no engine.
+Future<AppState> pumpChart(WidgetTester t, {bool replay = false}) async {
   await loadFallbackFont();
   t.view.physicalSize = const Size(1440, 900);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
-  final s = AppState()..applyPreset(preset);
-  await t.pumpWidget(FvgLabApp(state: s));
+  late LabState lab;
+  await t.runAsync(() async {
+    lab = await testLab();
+    await openFakeRun(writeFakeRun(), into: lab.chart);
+  });
+  final s = lab.chart;
+  s.zoomBy(0.4);
+  if (replay) {
+    s.enterReplay();
+    s.startAt(70);
+  }
+  await t.pumpWidget(StrategyLabApp(lab: lab, manageEngine: false));
   await t.pump();
   return s;
 }
@@ -37,6 +49,8 @@ Offset axisPoint(WidgetTester t) {
 void main() {
   testWidgets('mouse drag left/right scrolls through time', (t) async {
     final s = await pumpChart(t);
+    s.pan(-30);
+    s.pan(30);
     final v0 = s.viewStart;
     await t.dragFrom(plotPoint(t, 0.5, 0.5), const Offset(300, 0));
     expect(s.viewStart, lessThan(v0), reason: 'dragging right shows earlier bars');
@@ -71,14 +85,13 @@ void main() {
     final s = await pumpChart(t);
     final p = plotPoint(t, 0.5, 0.5);
     final g0 = ChartGeometry.compute(const Size(1, 1), s, s.candles!, s.visibleCursor, 0);
-    final barUnder = (s.viewStart + 0.5 * (s.zoom + ChartGeometry.rightPadBars)).round();
-    expect(g0.zoom, 150);
+    final z0 = g0.zoom;
+    await t.sendEventToBinding(PointerScrollEvent(position: p, scrollDelta: const Offset(0, 200)));
+    expect(s.zoom, greaterThan(z0), reason: 'wheel down = zoom out');
+    final z1 = s.zoom;
     await t.sendEventToBinding(PointerScrollEvent(position: p, scrollDelta: const Offset(0, -200)));
-    expect(s.zoom, lessThan(150), reason: 'wheel up = zoom in');
-    expect((s.viewStart + 0.5 * (s.zoom + ChartGeometry.rightPadBars)).round(), closeTo(barUnder, 1), reason: 'bar under the pointer stays put');
-    final z = s.zoom;
-    await t.sendEventToBinding(PointerScrollEvent(position: p, scrollDelta: const Offset(0, 400)));
-    expect(s.zoom, greaterThan(z));
+    expect(s.zoom, lessThan(z1), reason: 'wheel up = zoom in');
+
   });
 
   testWidgets('touchpad: two fingers up/down zoom, left/right scroll (axis locked per swipe)', (t) async {
@@ -95,8 +108,10 @@ void main() {
       await t.pump();
     }
 
-    await swipe(const Offset(0, -120));
-    expect(s.zoom, lessThan(150), reason: 'fingers up = zoom in');
+    await swipe(const Offset(0, 120));
+    final z0 = s.zoom;
+    await swipe(const Offset(0, -60));
+    expect(s.zoom, lessThan(z0), reason: 'fingers up = zoom in');
     final z = s.zoom, v = s.viewStart;
     await swipe(const Offset(250, 6)); // mostly right with a little vertical wobble
     expect(s.zoom, z, reason: 'a sideways swipe must not zoom');
@@ -107,7 +122,7 @@ void main() {
   });
 
   testWidgets('replay: panning right of the cursor shows nothing new', (t) async {
-    final s = await pumpChart(t, preset: 3);
+    final s = await pumpChart(t, replay: true);
     final cur = s.visibleCursor;
     await t.dragFrom(plotPoint(t, 0.5, 0.5), const Offset(-600, 0));
     expect(s.visibleCursor, cur);

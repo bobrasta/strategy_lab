@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect width="256" height="256" rx="56" fill="#0E0F11"/>
+  <rect x="38" y="38" width="180" height="180" rx="44" fill="#E8E9EB"/>
+  <!-- the app's logo mark: three bars -->
+  <rect x="78" y="138" width="24" height="48" rx="8" fill="#0E0F11"/>
+  <rect x="116" y="88" width="24" height="98" rx="8" fill="#0E0F11"/>
+  <rect x="154" y="78" width="24" height="42" rx="8" fill="#C9A54C"/>
+</svg>

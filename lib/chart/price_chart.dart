@@ -5,14 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/candles.dart';
-import '../data/events.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import '../util/format.dart';
 import 'chart_geometry.dart';
 import 'chart_layer.dart';
-import 'fvg_layer.dart';
 import 'paint_utils.dart';
+import 'trades_layer.dart';
 
 class PriceChart extends StatefulWidget {
   const PriceChart({super.key, required this.state});
@@ -22,8 +21,7 @@ class PriceChart extends StatefulWidget {
   State<PriceChart> createState() => _PriceChartState();
 }
 
-class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100), value: 1);
+class _PriceChartState extends State<PriceChart> {
   ChartGeometry? _geo;
   AppState get s => widget.state;
 
@@ -122,21 +120,6 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
     if (d.delta.dy != 0 && g.bottom > g.top) s.shiftPrice(d.delta.dy / (g.bottom - g.top) / s.priceZoom);
   }
 
-  @override
-  void initState() {
-    super.initState();
-    s.pulseTick.addListener(_onPulse);
-  }
-
-  @override
-  void dispose() {
-    s.pulseTick.removeListener(_onPulse);
-    _pulse.dispose();
-    super.dispose();
-  }
-
-  void _onPulse() => _pulse.forward(from: 0);
-
   void _hover(Offset p) {
     final g = _geo;
     if (g == null || !s.loaded) return;
@@ -166,18 +149,10 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
       s.startAt(h.bar);
       return;
     }
-    final cur = s.visibleCursor, price = g.price(h.y);
-    final ctx = LayerContext(state: s, candles: s.candles!, cursor: cur, pulse: 0);
-    Zone? hit;
-    for (final z in s.zones) {
-      if (z.formed > cur || !FvgLayer.drawn(z, ctx)) continue; // only zones that are on screen
-      final end = cur >= z.end ? z.end : cur;
-      if (h.bar >= z.start && h.bar <= end && price >= z.ev.bottom && price <= z.ev.top) {
-        hit = z;
-        break;
-      }
-    }
-    if (hit != null || !s.isReplay) s.select(hit?.ev.id);
+    final cur = s.visibleCursor;
+    final ctx = LayerContext(state: s, candles: s.candles!, cursor: cur, nowMs: s.nowMs);
+    final hit = s.layersOn.contains('trades') ? TradesLayer.hit(g, ctx, h.bar, g.price(h.y)) : null;
+    if (hit != null || !s.isReplay) s.selectTrade(hit?.ticket);
   }
 
   @override
@@ -202,16 +177,15 @@ class _PriceChartState extends State<PriceChart> with SingleTickerProviderStateM
             onPanUpdate: _onDrag,
             onPanEnd: (_) => setState(() => _dragging = false),
             onPanCancel: () => setState(() => _dragging = false),
-            child: CustomPaint(painter: ChartPainter(s, _pulse, (g) => _geo = g), child: const SizedBox.expand()),
+            child: CustomPaint(painter: ChartPainter(s, (g) => _geo = g), child: const SizedBox.expand()),
           ),
         ),
       );
 }
 
 class ChartPainter extends CustomPainter {
-  ChartPainter(this.s, this.pulse, this.onGeometry) : super(repaint: Listenable.merge([s, s.hover, pulse]));
+  ChartPainter(this.s, this.onGeometry) : super(repaint: Listenable.merge([s, s.hover]));
   final AppState s;
-  final Animation<double> pulse;
   final void Function(ChartGeometry) onGeometry;
 
   @override
@@ -219,9 +193,8 @@ class ChartPainter extends CustomPainter {
     final c = s.candles;
     if (c == null || c.length == 0) return;
     final cur = s.visibleCursor;
-    final layers = chartLayers.where((l) => l.available && s.layersOn.contains(l.id)).toList();
-    final dock = layers.fold<double>(0, (a, l) => a + l.dockedRightWidth);
-    final g = ChartGeometry.compute(size, s, c, cur, dock);
+    final layers = chartLayers.where((l) => l.available(s) && s.layersOn.contains(l.id)).toList();
+    final g = ChartGeometry.compute(size, s, c, cur, 0);
     onGeometry(g);
     final pw = g.plotW, ph = g.plotH, ax = g.axisX;
     final gridP = Paint()..color = C.line;
@@ -246,35 +219,13 @@ class ChartPainter extends CustomPainter {
       drawText(canvas, fmtAxis(s.timeOf(i)), Offset(x, ph + 14), axisStyle, align: TextAlign.center);
     }
 
-    // M1 drill-down: faint boundaries of the events' timeframe candles.
-    if (s.drill != null) {
-      final em = tfMinutes(s.eventsTf ?? 'M15') * 60000;
-      final bp = Paint()..color = C.line;
-      final last = min(c.length - 1, g.viewStart + g.slots);
-      for (var i = max(0, g.viewStart); i <= last; i++) {
-        if (c.t[i] % em == 0) {
-          final x = g.x(i) - g.xs / 2;
-          canvas.drawLine(Offset(x, 0), Offset(x, ph), bp);
-        }
-      }
-    }
-
-    final ctx = LayerContext(state: s, candles: c, cursor: cur, pulse: 1 - pulse.value);
+    final ctx = LayerContext(state: s, candles: c, cursor: cur, nowMs: s.nowMs);
     canvas.save();
     canvas.clipRect(Rect.fromLTWH(0, 0, pw, ph));
     for (final l in layers) {
       l.paintBelow(canvas, g, ctx);
     }
     _candles(canvas, g, c, cur, hv);
-    final pk = s.peek;
-    if (pk != null && pk < c.length) {
-      // Hidden first-touch bar: only its open is shown until the prediction is made.
-      final x = g.x(pk), y = g.y(c.o[pk]), w = (g.xs * 0.6).clamp(1.0, 10.0) + 6;
-      canvas.drawLine(Offset(x - w / 2, y), Offset(x + w / 2, y),
-          Paint()
-            ..color = C.text
-            ..strokeWidth = 1.5);
-    }
     for (final l in layers) {
       l.paintAbove(canvas, g, ctx);
     }

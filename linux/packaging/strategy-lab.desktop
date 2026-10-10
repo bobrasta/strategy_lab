@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Strategy Lab
+GenericName=Backtest runner
+Comment=Run, replay and compare Hummer engine backtests
+Exec=@BIN@
+Icon=strategy-lab
+Terminal=false
+Categories=Office;Finance;
+Keywords=backtest;trading;MT5;strategy;hummer;
+StartupNotify=true
+StartupWMClass=com.example.strategy_lab
