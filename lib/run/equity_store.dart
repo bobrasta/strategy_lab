@@ -50,11 +50,26 @@ class EquityIndex {
   final Int64List gMs, gFirstMs;
   final Float64List gBalance, gEquity, gEqMin, gEqMax, gDd, gDdPct;
 
+  /// The whole-run buckets, as the graph consumes them.
+  GraphBuckets get graph => GraphBuckets(gMs, gFirstMs, gBalance, gEquity, gEqMin, gEqMax, gDd, gDdPct, perBucket: perBucket);
+
+  /// Rows per graph bucket (1 = every row is its own bucket, nothing finer exists).
+  int get perBucket => buckets == 0 ? 1 : (rows / buckets).ceil();
+
   bool get hasDrawdown => columns.contains('drawdown_pct');
   bool get hasProfit => columns.contains('profit');
   int get firstMs => blockMs.isEmpty ? 0 : blockMs.first;
   int get lastMs => gMs.isEmpty ? 0 : gMs.last;
   int get buckets => gMs.length;
+}
+
+/// Graph buckets for a span of rows; see [EquityIndex.gMs] for what each array holds.
+class GraphBuckets {
+  GraphBuckets(this.ms, this.firstMs, this.balance, this.equity, this.eqMin, this.eqMax, this.dd, this.ddPct, {required this.perBucket});
+  final Int64List ms, firstMs;
+  final Float64List balance, equity, eqMin, eqMax, dd, ddPct;
+  final int perBucket;
+  int get length => ms.length;
 }
 
 class _Cols {
@@ -83,64 +98,69 @@ EquityRow? _row(Uint8List b, int s, int e, _Cols c, CsvLine f) {
   return EquityRow(ms, deal, bal, eq, mn, mg, num(c.profit), num(c.drawdown), num(c.drawdownPct));
 }
 
-/// One sequential pass over equity.csv in 8 MB chunks (never the whole ~290 MB file in memory).
-/// Runs inside an isolate.
+/// Calls [take] for every non-empty line in the byte range [start, end) of [raf], reading it in
+/// 8 MB chunks (never a whole ~290 MB file in memory). [start] must be at a line start.
+void _forEachLine(RandomAccessFile raf, int start, int end, void Function(Uint8List b, int s, int e, int off) take) {
+  const chunk = 8 << 20;
+  var buf = Uint8List(min(chunk, end - start) + 4096);
+  var have = 0, off = start; // bytes in buf; file offset of buf[0]
+  raf.setPositionSync(start);
+  bool fill() {
+    if (off + have >= end) return false;
+    final want = min(chunk, end - off - have);
+    if (buf.length - have < want) {
+      final nb = Uint8List(have + want + 4096);
+      nb.setRange(0, have, buf);
+      buf = nb;
+    }
+    final got = raf.readIntoSync(buf, have, have + want);
+    have += got;
+    return got > 0;
+  }
+
+  var ls = 0;
+  while (fill()) {
+    for (var i = ls; i < have; i++) {
+      if (buf[i] == 10) {
+        if (i > ls) take(buf, ls, i, off);
+        ls = i + 1;
+      }
+    }
+    // keep the partial line, refill
+    final rest = have - ls;
+    buf.setRange(0, rest, buf, ls);
+    off += ls;
+    have = rest;
+    ls = 0;
+  }
+  if (have > 0) take(buf, 0, have, off);
+}
+
+/// One sequential pass over equity.csv. Runs inside an isolate.
 EquityIndex scanEquityFile(String path, {int targetBuckets = 3000}) {
   final f = File(path);
   if (!f.existsSync()) throw RunLoadError('equity.csv is missing (${f.path}).');
   final raf = f.openSync();
   try {
     final len = raf.lengthSync();
-    const chunk = 8 << 20;
-    var buf = Uint8List(chunk + 4096);
-    var have = 0, off = 0; // bytes in buf; file offset of buf[0]
-    bool fill() {
-      if (off + have >= len) return false;
-      if (buf.length - have < chunk) {
-        final nb = Uint8List(have + chunk + 4096);
-        nb.setRange(0, have, buf);
-        buf = nb;
-      }
-      have += raf.readIntoSync(buf, have, have + min(chunk, buf.length - have));
-      return true;
-    }
-
-    fill();
-    var nl = buf.indexOf(10);
-    if (nl < 0 || nl > have) throw RunLoadError('equity.csv has no header line.');
-    final header = String.fromCharCodes(buf, 0, nl).trim().split(',');
+    final head = raf.readSync(min(len, 1 << 20));
+    final nl = head.indexOf(10);
+    if (nl < 0) throw RunLoadError('equity.csv has no header line.');
+    final header = String.fromCharCodes(head, 0, nl).trim().split(',');
     final cols = _Cols(header);
     if (cols.time < 0 || cols.balance < 0 || cols.equity < 0 || cols.equityMin < 0 || cols.margin < 0) {
       throw RunLoadError('equity.csv has unexpected columns: ${header.join(',')}');
     }
-    // Rows per graph bucket, from the average row length of the first chunk.
+    // Rows per graph bucket, from the average row length of the first MB.
     var sampleRows = 0;
-    for (var i = nl + 1; i < have; i++) {
-      if (buf[i] == 10) sampleRows++;
+    for (var i = nl + 1; i < head.length; i++) {
+      if (head[i] == 10) sampleRows++;
     }
-    final avg = sampleRows == 0 ? 80.0 : (have - nl) / sampleRows;
+    final avg = sampleRows == 0 ? 80.0 : (head.length - nl) / sampleRows;
     final perBucket = max(1, (len / avg / targetBuckets).ceil());
 
     final sc = _Scan(cols, header.length, perBucket);
-    var ls = nl + 1;
-    while (true) {
-      for (var i = ls; i < have; i++) {
-        if (buf[i] == 10) {
-          if (i > ls) sc.take(buf, ls, i, off);
-          ls = i + 1;
-        }
-      }
-      // keep the partial line, refill
-      final rest = have - ls;
-      buf.setRange(0, rest, buf, ls);
-      off += ls;
-      have = rest;
-      ls = 0;
-      if (!fill()) {
-        if (have > 0) sc.take(buf, 0, have, off);
-        break;
-      }
-    }
+    _forEachLine(raf, nl + 1, len, sc.take);
     return EquityIndex(
       fileLen: len,
       rows: sc.rows,
@@ -156,6 +176,29 @@ EquityIndex scanEquityFile(String path, {int targetBuckets = 3000}) {
       gDd: Float64List.fromList(sc.gDd),
       gDdPct: Float64List.fromList(sc.gDdp),
     );
+  } finally {
+    raf.closeSync();
+  }
+}
+
+/// Graph buckets for the rows stamped in [fromMs, toMs], read from the byte range [offStart,
+/// offEnd) (block boundaries from the index) and bucketed by [perBucket] rows. For the graph's
+/// zoom; runs inside an isolate.
+GraphBuckets scanEquityRange(String path, List<String> columns, int offStart, int offEnd, int fromMs, int toMs, int perBucket) {
+  final raf = File(path).openSync();
+  try {
+    final cols = _Cols(columns);
+    final sc = _Scan(cols, columns.length, perBucket);
+    final probe = CsvLine(columns.length + 2);
+    _forEachLine(raf, offStart, offEnd, (b, s, e, off) {
+      probe.split(b, s, e);
+      if (probe.count < cols.count) return;
+      final ms = parseTimeBytes(b, probe.start(cols.time), probe.end(cols.time));
+      if (ms != null && ms >= fromMs && ms <= toMs) sc.take(b, s, e, off);
+    });
+    return GraphBuckets(Int64List.fromList(sc.gMs), Int64List.fromList(sc.gFirst), Float64List.fromList(sc.gBal), Float64List.fromList(sc.gEq),
+        Float64List.fromList(sc.gMin), Float64List.fromList(sc.gMax), Float64List.fromList(sc.gDd), Float64List.fromList(sc.gDdp),
+        perBucket: perBucket);
   } finally {
     raf.closeSync();
   }
@@ -270,6 +313,21 @@ class EquityStore {
       best = r;
     }
     return best;
+  }
+
+  /// Graph buckets for the rows stamped in [fromMs, toMs], about [target] of them, read in a
+  /// background isolate from just the blocks that hold those rows.
+  Future<GraphBuckets> bucketsIn(int fromMs, int toMs, int target) {
+    final ix = index;
+    final b0 = max(0, _blockFor(fromMs)), b1 = _blockFor(toMs) + 1;
+    final offStart = ix.blockOff.isEmpty ? 0 : ix.blockOff[b0];
+    final offEnd = b1 < ix.blockOff.length ? ix.blockOff[b1] : ix.fileLen;
+    // Rows in the window, from its share of the blocks' time span (rows are ~even in time).
+    final blocksEnd = b1 < ix.blockMs.length ? ix.blockMs[b1] : ix.lastMs;
+    final share = min(1.0, (toMs - fromMs) / max(1, blocksEnd - ix.blockMs[b0]));
+    final perBucket = max(1, ((b1 - b0) * EquityIndex.blockRows * share / target).ceil());
+    final p = path, cols = ix.columns;
+    return Isolate.run(() => scanEquityRange(p, cols, offStart, offEnd, fromMs, toMs, perBucket));
   }
 
   void close() {

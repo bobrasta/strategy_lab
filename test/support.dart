@@ -55,13 +55,14 @@ String candlesCsv(int n, {DateTime? start, int minutes = 15, Map<int, List<doubl
 
 const eventsHeader = 'time,touch_time,end_time,edge,far,dir,gap_atr,age,max_wick,max_close,outcome,bars,scenario,size_q';
 
-/// Geist isn't bundled; on this machine the app falls back to Noto Sans, so widget tests measure with it.
-Future<void> loadFallbackFont() async {
-  const noto = '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf';
-  if (!File(noto).existsSync()) return;
-  for (final family in ['Geist', 'Noto Sans']) {
-    await (FontLoader(family)..addFont(Future.value(ByteData.sublistView(File(noto).readAsBytesSync())))).load();
+/// Widget tests measure text with the bundled Geist (assets/fonts, as in pubspec.yaml), not the
+/// test font, so layout checks see the app's real text widths.
+Future<void> loadAppFont() async {
+  final loader = FontLoader('Geist');
+  for (final w in ['Light', 'Regular', 'Medium', 'SemiBold', 'Bold']) {
+    loader.addFont(Future.value(ByteData.sublistView(File('assets/fonts/Geist-$w.ttf').readAsBytesSync())));
   }
+  await loader.load();
 }
 
 final t0 = DateTime.utc(2022, 3, 1);

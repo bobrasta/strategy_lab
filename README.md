@@ -19,7 +19,7 @@ Development: `flutter run -d linux`. `--dart-define=SETTINGS_DIR=<dir>` keeps th
 | Where | What |
 |---|---|
 | **Tester** (right) | Strategy (`strategies/*.cpp`, built / stale / not built) and **Build**; inputs form from `hummer inputs`; M1 data file; From/To (UTC, inclusive); the strategy's **protected period**; tick path, ambiguity rule, deposit, leverage; cost overrides (empty = the profile's value; zero-cost switch); **Start** with progress, **Stop**. |
-| **Results** (bottom) | Backtest (the MT5-style report), Graph (balance, equity with its per-interval range, equity drawdown %), Trades, Deals, Journal, **History**, Build. Taller/shorter toggle. |
+| **Results** (bottom) | Backtest (the MT5-style report), Graph (balance, equity with its per-interval range, equity drawdown %; wheel or two-finger up/down zooms the time range at the pointer, sideways or drag pans, double-click or **Full range** resets), Trades, Deals, Journal, **History**, Build. Taller/shorter toggle. |
 | **Chart** | Candles of the run's data file, cut at the run's end; M1/M5/M15/H1. Layers: trades (entry arrows, initial SL/TP, entry→exit line coloured by result), the strategy's drawings, optional FVG study zones (rail → Load events). Click a trade on the chart or in Trades to select it. |
 | **Replay** | Top bar → Replay, then click a bar, Jump to date, or **Replay trade** (50 bars before its entry). Space play/pause, ←/→ step, N or Shift+→ next trade event, 1–100 bars/s. The readout shows position, floating P&L, equity, balance and margin at the cursor, from the exact `equity.csv` row. |
 | **History** | Every run in the engine's `runs/` with strategy, range, key inputs, trades, net profit, run time. Click to reopen (no re-run). Tick two and **Compare**: equity curves on one axis and all report fields side by side. |
@@ -46,6 +46,7 @@ Development: `flutter run -d linux`. `--dart-define=SETTINGS_DIR=<dir>` keeps th
 
 ```bash
 flutter analyze && flutter test        # unit + widget tests; real-data / real-engine ones skip if missing
+git config core.hooksPath .githooks   # once per clone: pre-commit runs scripts/check_repo.sh (no runs/, build/, data CSVs, equity files)
 # Acceptance against the real engine (opens a window; runs fvg_continuation on 2021–2023 only):
 flutter test integration_test/acceptance_test.dart -d linux --dart-define=SETTINGS_DIR=/tmp/sl-accept
 flutter test integration_test/restart_test.dart    -d linux --dart-define=SETTINGS_DIR=/tmp/sl-accept

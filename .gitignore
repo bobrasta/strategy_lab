@@ -30,7 +30,7 @@ migrate_working_dir/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
-/build/
+build/
 /coverage/
 
 # Symbolication related
@@ -46,3 +46,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Engine run outputs and market data never go into git (the engine's CLAUDE.md rule 7). A small
+# test fixture CSV can be added with `git add -f`; scripts/check_repo.sh (pre-commit hook and
+# flutter test) rejects data-sized ones and per-M1 equity files.
+runs/
+*.csv

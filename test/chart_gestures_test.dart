@@ -12,7 +12,7 @@ import 'support.dart';
 
 /// The app with a fake run open on M1 (120 bars, so the view starts zoomed in) and no engine.
 Future<AppState> pumpChart(WidgetTester t, {bool replay = false}) async {
-  await loadFallbackFont();
+  await loadAppFont();
   t.view.physicalSize = const Size(1440, 900);
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);

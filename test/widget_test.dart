@@ -33,7 +33,7 @@ Future<List<RunManifest>> runsFolder() async {
 }
 
 Future<LabState> pumpApp(WidgetTester t, Size size, {bool withRun = true}) async {
-  await loadFallbackFont();
+  await loadAppFont();
   t.view.physicalSize = size;
   t.view.devicePixelRatio = 1;
   addTearDown(t.view.reset);
