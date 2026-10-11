@@ -3,7 +3,7 @@
 ## Done
 
 ### M7: Indicators (app side, 2026-10-11)
-Client written to SPEC §7.7 / §8.2 / §14 "Strategy Lab (M7, indicators)" before the engine side exists. **Verified against the real engine: pending** (the engine's M7 isn't built yet; everything below is tested against hand-made output folders and a fake service).
+Client written to SPEC §7.7 / §8.2 / §14 "Strategy Lab (M7, indicators)" before the engine side existed, against hand-made output folders and a fake service. **Verified against the real engine on 2026-10-11** (engine master 4d9dec3): the protocol matched as written, no app change was needed; see Verified.
 - **Indicators panel** (right drawer, shared with the Tester; top bar **Indicators**, rail icon): `list_indicators` with built / stale / not built (polled with the strategies every 4 s), **Build** via `build_indicator` (same build slot and Build tab as strategies; `BuildState.kind` tells them apart, so an indicator build refreshes the indicator list and recomputes its instances, not the strategy list), **Add** → the inputs form from `indicator_inputs` (the Tester's `InputRow`, now in `widgets/input_form.dart`, plus the declared plots as swatches) → **Add to chart**.
 - **Jobs:** `start_indicator {indicator, data, inputs, profile}` on the chart's data file (`AppState.candlesPath`), whole file (no from/to); progress from `indicator_queued/started/progress`; `indicator_finished` → the output folder is read in an isolate. Events that arrive before the response (a cache hit "follows at once") are buffered per job, as for runs. Failures show the error, signal / exit code and the journal / stderr tails, with **Retry**. Remove or Edit while running → `stop_indicator`; late events of an old job are dropped (per-instance generation).
 - **No indicator support** (today's engine answers `unknown_method`): the panel shows "This engine has no indicator support. Use Build engine, or update the engine." with Build / Restart engine, and nothing else; no job is started; re-probed on every engine start.
@@ -31,7 +31,10 @@ Client written to SPEC §7.7 / §8.2 / §14 "Strategy Lab (M7, indicators)" befo
 
 ## Verified
 
-- M7: `flutter analyze` no issues; `flutter test` 88 passing (62 + 26 indicator tests). Against the real engine: pending (engine M7 not implemented yet).
+- M7: `flutter analyze` no issues; `flutter test` 88 passing (62 + 26 indicator tests).
+- M7 acceptance against the real engine (`integration_test/indicators_test.dart` + `indicators_restart_test.dart`, same settings folder, from an empty `runs/indicators/`): Indicators panel → Open chart (the data file, no run) → Build donchian (build events with `kind: indicator`, listed as built) → Add with Period 30 typed into the form → computed by a `hummer indicator` worker (1.2 s) → layer drawn in Explore; Replay: nothing before the first stamp, no point stamped after the cursor while playing; fvg added (zones only as of the cursor, none at bar 0); Edit donchian to 25 → new folder and label; Remove fvg; re-adding donchian (25) is a cache hit (same folder, `cache hit` in serve.log, no worker); restart → data chart and donchian (25) restored, served from the cache; `pgrep hummer` empty after each.
+- Screenshot of the release build (1440×900, scratch settings) with donchian (25), fvg and consolidation attached: channel lines end at the last completed H1 bar, fvg zones stop where filled.
+- After the engine's plugin ABI 2, strategies built before M7 are refused ("built for ABI 1 … rebuild it") and listed stale; `test/run_data_test.dart` needs `build/strategies/ma_cross.so` rebuilt (done).
 - `flutter analyze`: no issues. `flutter test`: 62 passing (graph zoom: window buckets vs the rows, isolate bucketing, window points under a replay cut, time ticks, wheel/double-click/Full range; fast parsers bit-identical to `double.parse` on 200k values; equity store vs a linear scan across block boundaries; replay rules bar by bar on a hand-made run; protected periods; settings round-trip; app = CLI trades from a real engine run; widgets at 1440×900 and 1920×1037).
 - Acceptance against the real engine (`integration_test/`): build fvg_continuation, run 2021-01-01..2023-12-31, open, replay a trade; To = 2024-03-31 → Start shows the protected-period dialog, Cancel starts nothing; restart (new process, same settings) → settings remembered, the run reopens from History and replays; `pgrep hummer` empty after each.
 - `kill -9` of a worker mid-run → "Run failed · SIGKILL", the next run works. `kill -9` of the app → the service exits (parent-death signal). Window close → `shutdown` logged, no processes left.
@@ -64,7 +67,6 @@ Client written to SPEC §7.7 / §8.2 / §14 "Strategy Lab (M7, indicators)" befo
 
 ## Left / ideas
 
-- Indicators, still to verify against the real engine once M7 lands: the method/event field names above, `plots.csv`'s header and EMPTY_VALUE encoding, `indicator_inputs`' `schema` shape, a cached start answered with `indicator_finished` right away, the build events' `kind`, and the M7 acceptance run (build, add with inputs, Explore, Replay, edit, remove, restart; re-adding is a cache hit).
 - Indicator values in the OHLC readout (MT5's Data Window), and a sub-window for oscillators (SPEC: main chart only in v1).
 
 - A per-deal x-axis on the graph, like MT5's.

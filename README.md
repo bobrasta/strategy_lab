@@ -52,6 +52,9 @@ git config core.hooksPath .githooks   # once per clone: pre-commit runs scripts/
 # Acceptance against the real engine (opens a window; runs fvg_continuation on 2021–2023 only):
 flutter test integration_test/acceptance_test.dart -d linux --dart-define=SETTINGS_DIR=/tmp/sl-accept
 flutter test integration_test/restart_test.dart    -d linux --dart-define=SETTINGS_DIR=/tmp/sl-accept
+# M7 indicators (build, add, Explore, Replay, edit, remove, cache hit; then restart), in a new empty settings folder:
+flutter test integration_test/indicators_test.dart         -d linux --dart-define=SETTINGS_DIR=/tmp/sl-ind
+flutter test integration_test/indicators_restart_test.dart -d linux --dart-define=SETTINGS_DIR=/tmp/sl-ind
 # UI-stall measurement + kill -9 of a worker, in profile mode (like the installed app):
 flutter drive --profile -d linux --driver=test_driver/integration_test.dart \
   --target=integration_test/engine_test.dart --dart-define=SETTINGS_DIR=/tmp/sl-accept
