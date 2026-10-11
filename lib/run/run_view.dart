@@ -13,6 +13,19 @@ class DrawObj {
   int? t2;
 }
 
+/// The object a `create` event makes (drawings.jsonl, SPEC §7.4). Shared by runs and indicators.
+DrawObj createDrawObj(String name, Object? kind, Object? color, Object? label, Object? shape) =>
+    DrawObj(name, '$kind', '${color ?? 'mute'}', '${label ?? ''}', shape is String ? shape : null);
+
+/// Applies a `create`/`move` event's geometry: absent fields keep their value; `t2: null` is
+/// OPEN_END (the object extends to "now").
+void moveDrawObj(DrawObj o, {int? t1, double? p1, bool hasT2 = false, int? t2, double? p2}) {
+  o.t1 = t1 ?? o.t1;
+  o.p1 = p1 ?? o.p1;
+  if (hasT2) o.t2 = t2;
+  o.p2 = p2 ?? o.p2;
+}
+
 /// An opened run: its files, its equity store, and lookups at a moment [ms] that never read
 /// anything stamped after [ms] (the replay rule).
 class RunView {
@@ -81,14 +94,11 @@ class RunView {
         _objs.remove(e.name);
         return;
       case 'create':
-        _objs[e.name] = DrawObj(e.name, '${j['kind']}', '${j['color'] ?? 'mute'}', '${j['label'] ?? ''}', j['shape'] as String?);
+        _objs[e.name] = createDrawObj(e.name, j['kind'], j['color'], j['label'], j['shape']);
     }
     final o = _objs[e.name];
     if (o == null) return;
-    o.t1 = engineMs(j['t1']) ?? o.t1;
-    o.p1 = (j['p1'] as num?)?.toDouble() ?? o.p1;
-    if (j.containsKey('t2')) o.t2 = engineMs(j['t2']);
-    o.p2 = (j['p2'] as num?)?.toDouble() ?? o.p2;
+    moveDrawObj(o, t1: engineMs(j['t1']), p1: (j['p1'] as num?)?.toDouble(), hasT2: j.containsKey('t2'), t2: engineMs(j['t2']), p2: (j['p2'] as num?)?.toDouble());
   }
 
   void dispose() => equity?.close();

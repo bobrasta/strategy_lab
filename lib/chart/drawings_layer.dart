@@ -34,9 +34,19 @@ class DrawingsLayer extends ChartLayer {
   @override
   void paintBelow(Canvas canvas, ChartGeometry g, LayerContext ctx) {
     final run = ctx.state.run;
-    if (run == null) return;
+    if (run != null) paintZones(canvas, g, ctx, run.drawingsAt(ctx.nowMs));
+  }
+
+  @override
+  void paintAbove(Canvas canvas, ChartGeometry g, LayerContext ctx) {
+    final run = ctx.state.run;
+    if (run != null) paintObjects(canvas, g, ctx, run.drawingsAt(ctx.nowMs));
+  }
+
+  /// Zones as of the cursor (below the candles). Shared with indicator objects.
+  static void paintZones(Canvas canvas, ChartGeometry g, LayerContext ctx, Iterable<DrawObj> objs) {
     final (from, to) = ctx.viewSpan(g);
-    for (final o in run.drawingsAt(ctx.nowMs)) {
+    for (final o in objs) {
       if (o.kind != 'zone') continue;
       final end = o.t2 ?? ctx.nowMs;
       if (end < from || o.t1 > to) continue;
@@ -49,15 +59,13 @@ class DrawingsLayer extends ChartLayer {
     }
   }
 
-  @override
-  void paintAbove(Canvas canvas, ChartGeometry g, LayerContext ctx) {
-    final run = ctx.state.run;
-    if (run == null) return;
+  /// Markers, lines and the hover label (above the candles). Shared with indicator objects.
+  static void paintObjects(Canvas canvas, ChartGeometry g, LayerContext ctx, Iterable<DrawObj> objs) {
     final (from, to) = ctx.viewSpan(g);
     final hv = ctx.state.hover.value;
     final hp = hv == null ? null : Offset(g.x(hv.bar), hv.y);
     DrawObj? label;
-    for (final o in run.drawingsAt(ctx.nowMs)) {
+    for (final o in objs) {
       final col = colorOf(o.color);
       switch (o.kind) {
         case 'marker':

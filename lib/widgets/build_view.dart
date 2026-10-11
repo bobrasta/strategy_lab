@@ -40,7 +40,7 @@ class _BuildViewState extends State<BuildView> {
       title = lab.engineBuilding ? 'Building the engine (cmake --preset release && cmake --build --preset release)…' : (lab.engineBuildResult ?? '');
       color = lab.engineBuilding ? C.text : ((lab.engineBuildResult ?? '').contains('OK') ? C.green : C.red);
     } else if (b == null) {
-      title = 'No build yet. Choose a strategy in the Tester and press Build.';
+      title = 'No build yet. Build a strategy in the Tester, or an indicator in Indicators.';
       color = C.mute;
     } else {
       title = switch (b.status) {

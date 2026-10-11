@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../util/format.dart';
 import 'common.dart';
 import 'fields.dart';
+import 'indicators_panel.dart' show editIndicator;
 import 'top_bar.dart' show engineColor, engineLabel;
 
 class LogoMark extends StatelessWidget {
@@ -50,6 +51,7 @@ class CollapsedRail extends StatelessWidget {
         const SizedBox(height: 16),
         for (final (icon, tip, onTap) in [
           (AppIcons.tester, 'Tester', () => s.toggleRight()),
+          (AppIcons.indicators, 'Indicators', () => s.toggleIndicators()),
           (AppIcons.results, 'Results', () => s.toggleBottom()),
           (AppIcons.history, 'Run history', () => s.showTab(ResultsTab.history)),
           (AppIcons.tools, 'Layers and engine', () => s.toggleLeft(true)),
@@ -136,6 +138,32 @@ class ExpandedRail extends StatelessWidget {
                 ]),
               ),
             ),
+          for (final i in lab.indicators.instances)
+            Padding(
+              key: ValueKey('rail-indicator-${i.uid}'),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+              child: Row(children: [
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(i.label, overflow: TextOverflow.ellipsis, style: ts(13)),
+                    const SizedBox(height: 2),
+                    Text(i.status, maxLines: 2, overflow: TextOverflow.ellipsis, style: ts(11, color: i.state == 'failed' ? C.red : C.mute)),
+                  ]),
+                ),
+                RoundIconButton(icon: AppIcons.study, size: 26, iconSize: 14, color: C.mute, tooltip: 'Edit inputs', onTap: () => editIndicator(lab, i)),
+                RoundIconButton(icon: AppIcons.clear, size: 26, iconSize: 14, color: C.mute, tooltip: 'Remove', onTap: () => lab.indicators.remove(i)),
+                const SizedBox(width: 4),
+                PillSwitch(value: i.visible, onChanged: (v) => lab.indicators.setVisible(i, v)),
+              ]),
+            ),
+          Row(children: [
+            Expanded(
+              child: Text(lab.indicators.instances.isEmpty ? 'No indicators attached' : '${lab.indicators.instances.length} indicator${lab.indicators.instances.length == 1 ? '' : 's'}',
+                  style: ts(11, color: C.mute)),
+            ),
+            PillButton(label: 'Indicators…', icon: AppIcons.indicators, height: 26, fontSize: 11, onTap: () => s.toggleIndicators(true)),
+          ]),
+          const SizedBox(height: 10),
           Row(children: [
             Expanded(child: Text(s.events.isEmpty ? 'No FVG events loaded' : '${fmtInt(s.events.length)} events · ${_fileName(s.eventsPath)}', overflow: TextOverflow.ellipsis, style: ts(11, color: C.mute))),
             if (s.events.isNotEmpty) PillButton(label: 'Clear', height: 26, fontSize: 11, onTap: s.clearEvents),

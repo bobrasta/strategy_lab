@@ -349,6 +349,11 @@ class EmptyState extends StatelessWidget {
               PillButton(label: 'Open Tester', icon: AppIcons.tester, variant: PillVariant.primary, height: 36, onTap: () => s.toggleRight(true)),
               const SizedBox(width: 8),
               PillButton(label: 'Run history', icon: AppIcons.history, height: 36, onTap: () => s.showTab(ResultsTab.history)),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Show the Tester\'s data file on its own, to attach indicators',
+                child: PillButton(label: 'Open chart', icon: AppIcons.indicators, height: 36, enabled: lab.opening == null, onTap: () => lab.openDataChart()),
+              ),
             ]),
           ]),
         ),

@@ -8,6 +8,7 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
 import '../chart/chart_geometry.dart';
+import '../chart/chart_layer.dart';
 import '../data/candles.dart';
 import '../data/events.dart';
 import '../data/loaders.dart';
@@ -15,6 +16,9 @@ import '../data/resample.dart';
 import '../run/run_view.dart';
 
 enum Mode { explore, replay }
+
+/// What the right drawer shows: MT5's Strategy Tester or its Navigator → Indicators.
+enum RightPanel { tester, indicators }
 
 /// Result-drawer tabs, after MT5's Strategy Tester.
 enum ResultsTab { backtest, graph, trades, deals, journal, history, build }
@@ -42,8 +46,12 @@ class AppState extends ChangeNotifier {
   String timeframe = 'M15';
   String? candlesPath;
 
-  /// The open run (results, equity, drawings). Null when no run is open.
+  /// The open run (results, equity, drawings). Null when no run is open (no chart, or a data
+  /// file shown on its own for indicators).
   RunView? run;
+
+  /// One layer per attached indicator (set by the Indicators state), drawn after the fixed ones.
+  List<ChartLayer> indicatorLayers = const [];
 
   // FVG study overlay (optional; zones from fvg_events.csv, outcomes from Python).
   List<FvgEvent> events = const [];
@@ -56,6 +64,7 @@ class AppState extends ChangeNotifier {
   // ── ui ──────────────────────────────────────────────────────────────
   String? busy, error, notice;
   Mode mode = Mode.explore;
+  RightPanel rightPanel = RightPanel.tester;
   bool leftOpen = false, rightOpen = false, bottomOpen = false, bottomTall = false, focus = false;
   ResultsTab tab = ResultsTab.backtest;
   bool selectMode = false, jumpOpen = false, playing = false;
@@ -103,7 +112,12 @@ class AppState extends ChangeNotifier {
   // ── run + candles ───────────────────────────────────────────────────
   /// Shows [bySeries] (the run's data file cut at the run's end: the base series plus any
   /// resampled ones, built off the UI isolate) with [view]'s results.
-  Future<void> showRun(RunView view, Map<String, Candles> bySeries, String path, {String? tf}) async {
+  Future<void> showRun(RunView view, Map<String, Candles> bySeries, String path, {String? tf}) => _show(view, bySeries, path, tf: tf);
+
+  /// Shows a data file's candles without a run (for indicators): the whole file.
+  Future<void> showData(Map<String, Candles> bySeries, String path) => _show(null, bySeries, path, tf: timeframe);
+
+  Future<void> _show(RunView? view, Map<String, Candles> bySeries, String path, {String? tf}) async {
     _exitReplayQuiet();
     run?.dispose();
     run = view;
@@ -276,7 +290,22 @@ class AppState extends ChangeNotifier {
 
   // ── chrome ──────────────────────────────────────────────────────────
   void toggleLeft([bool? v]) => _set(() => leftOpen = v ?? !leftOpen);
-  void toggleRight([bool? v]) => _set(() => rightOpen = v ?? !rightOpen);
+  void toggleRight([bool? v]) => _togglePanel(RightPanel.tester, v);
+  void toggleIndicators([bool? v]) => _togglePanel(RightPanel.indicators, v);
+  bool panelOpen(RightPanel p) => rightOpen && rightPanel == p;
+
+  /// The Tester and the Indicators share the right drawer; opening one replaces the other.
+  void _togglePanel(RightPanel p, bool? v) => _set(() {
+        final want = v ?? !panelOpen(p);
+        if (want) {
+          rightOpen = true;
+          rightPanel = p;
+        } else if (rightPanel == p) {
+          rightOpen = false;
+        }
+      });
+
+  void setIndicatorLayers(List<ChartLayer> layers) => _set(() => indicatorLayers = layers);
   void toggleBottom([bool? v]) => _set(() => bottomOpen = v ?? !bottomOpen);
   void toggleTall() => _set(() => bottomTall = !bottomTall);
   void showTab(ResultsTab t) => _set(() {

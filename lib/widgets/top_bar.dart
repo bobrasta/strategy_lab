@@ -30,7 +30,8 @@ class TopBar extends StatelessWidget {
           const SizedBox(width: 6),
           Expanded(
             child: m == null
-                ? Text(lab.opening ?? 'No run open', overflow: TextOverflow.ellipsis, style: ts(13, color: C.mute))
+                ? Text(lab.opening ?? (s.candlesPath != null ? 'Data · ${s.candlesPath!.split(RegExp(r'[\\/]')).last}' : 'No run open'),
+                    overflow: TextOverflow.ellipsis, style: ts(13, color: C.mute))
                 : Row(children: [
                     Flexible(child: Text(m.strategyKey, overflow: TextOverflow.ellipsis, style: ts(13, w: FontWeight.w500))),
                     const SizedBox(width: 10),
@@ -54,11 +55,20 @@ class TopBar extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           PillButton(
+            key: const ValueKey('indicators-button'),
+            label: 'Indicators',
+            icon: AppIcons.indicators,
+            color: s.panelOpen(RightPanel.indicators) ? C.text : C.mute,
+            borderColor: s.panelOpen(RightPanel.indicators) ? C.lineHover : C.line,
+            onTap: () => s.toggleIndicators(),
+          ),
+          const SizedBox(width: 8),
+          PillButton(
             key: const ValueKey('tester-button'),
             label: 'Tester',
             icon: AppIcons.tester,
-            color: s.rightOpen ? C.text : C.mute,
-            borderColor: s.rightOpen ? C.lineHover : C.line,
+            color: s.panelOpen(RightPanel.tester) ? C.text : C.mute,
+            borderColor: s.panelOpen(RightPanel.tester) ? C.lineHover : C.line,
             onTap: () => s.toggleRight(),
           ),
           const SizedBox(width: 8),

@@ -35,6 +35,34 @@ void main() {
     expect(r.protectionFor('fvg_continuation'), isNull, reason: 'a removed default stays removed');
   });
 
+  test('attached indicators (name, inputs, visibility, order) and the data-only chart round-trip', () async {
+    final f = File('${tempDir().path}/settings.json');
+    final s = await Settings.load(f);
+    expect(s.indicators, isEmpty);
+    s
+      ..chartDataFile = '/data/m1.csv'
+      ..indicators = [
+        IndicatorSetting('fvg', const {'Tf': 'M15', 'MinGapAtr': '0.10'}),
+        IndicatorSetting('donchian', const {}, visible: false),
+        IndicatorSetting('fvg', const {}),
+      ];
+    await s.flush();
+    final r = await Settings.load(f);
+    expect(r.chartDataFile, '/data/m1.csv');
+    expect(r.indicators.map((i) => i.toJson()), [
+      {'name': 'fvg', 'inputs': {'Tf': 'M15', 'MinGapAtr': '0.10'}, 'visible': true},
+      {'name': 'donchian', 'inputs': {}, 'visible': false},
+      {'name': 'fvg', 'inputs': {}, 'visible': true},
+    ]);
+    expect(r.indicators.first.inputs.keys, ['Tf', 'MinGapAtr'], reason: 'input order kept for the label');
+    // Damaged entries are dropped, the rest kept.
+    final g = File('${tempDir().path}/settings.json')..writeAsStringSync('{"indicators": [{"name": "a"}, 3, {"inputs": {}}, {"name": "b", "inputs": {"N": 5}, "visible": false}]}');
+    expect((await Settings.load(g)).indicators.map((i) => i.toJson()), [
+      {'name': 'a', 'inputs': {}, 'visible': true},
+      {'name': 'b', 'inputs': {'N': '5'}, 'visible': false},
+    ]);
+  });
+
   test('defaults: fvg_continuation is protected from 2024-01-01; a damaged file falls back to defaults', () async {
     final f = File(writeTemp('settings.json', '{not json'));
     final s = await Settings.load(f);

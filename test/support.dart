@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:strategy_lab/data/candles.dart';
 import 'package:strategy_lab/data/candle_cache.dart';
+import 'package:strategy_lab/engine/engine_service.dart';
 import 'package:strategy_lab/run/equity_store.dart';
 import 'package:strategy_lab/run/run_data.dart';
 import 'package:strategy_lab/run/run_view.dart';
@@ -152,10 +154,172 @@ Future<AppState> openFakeRun(Directory run, {AppState? into}) async {
   return s;
 }
 
-/// A LabState with settings in a temp file and no engine started.
-Future<LabState> testLab({AppState? chart}) async {
-  final settings = await Settings.load(File('${tempDir().path}/settings.json'));
-  return LabState(chart: chart ?? AppState(), settings: settings);
+/// A LabState with settings in a temp file and no engine started (or [engine], a [FakeEngine]).
+Future<LabState> testLab({AppState? chart, EngineService? engine, Settings? settings}) async {
+  final st = settings ?? await Settings.load(File('${tempDir().path}/settings.json'));
+  return LabState(chart: chart ?? AppState(), settings: st, engine: engine);
 }
 
 Candles m1Of(AppState s) => s.series['M1']!;
+
+/// A stand-in for `hummer serve`: requests go to [handler] (throw [EngineError] for an error
+/// response), events are pushed with [emit]. Starts out ready; no process is involved.
+class FakeEngine extends EngineService {
+  FakeEngine(this.handler) : super(binary: '/nonexistent/hummer', workingDir: '/nonexistent') {
+    status = EngineStatus.ready;
+  }
+
+  FutureOr<dynamic> Function(String method, Map<String, dynamic> params) handler;
+  final calls = <(String, Map<String, dynamic>)>[];
+  final _ev = StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get events => _ev.stream;
+
+  void emit(Map<String, dynamic> e) => _ev.add(e);
+
+  List<Map<String, dynamic>> callsOf(String method) => [for (final c in calls) if (c.$1 == method) c.$2];
+
+  @override
+  Future<dynamic> request(String method, [Map<String, dynamic>? params]) async {
+    calls.add((method, params ?? const {}));
+    return handler(method, params ?? const {});
+  }
+
+  @override
+  Future<void> shutdown({Duration wait = const Duration(seconds: 2)}) async {}
+
+  @override
+  void dispose() {
+    _ev.close();
+    super.dispose();
+  }
+}
+
+/// The engine's answer to an indicator method before M7.
+const unknownMethod = EngineError('unknown_method', "unknown method 'list_indicators'");
+
+/// `list_indicators` rows.
+List<Map<String, dynamic>> indicatorList([Map<String, String> status = const {'band': 'built', 'fvg': 'stale', 'donchian': 'not_built'}]) => [
+      for (final e in status.entries)
+        {'name': e.key, 'source': '/x/indicators/${e.key}.cpp', 'so': '/x/build/indicators/${e.key}.so', 'status': e.value, 'source_mtime': 1, 'so_mtime': 2},
+    ];
+
+/// `indicator_inputs` for the fake "band" indicator: {schema, plots}.
+Map<String, dynamic> bandInputs() => {
+      'schema': {
+        'abi': 1,
+        'name': 'Band',
+        'kind': 'indicator',
+        'inputs': [
+          {'name': 'Tf', 'type': 'timeframe', 'default': 'M1', 'description': 'Timeframe'},
+          {'name': 'Period', 'type': 'int', 'default': 5, 'description': 'Bars', 'min': 1, 'max': 500},
+          {'name': 'Width', 'type': 'double', 'default': 0.1, 'description': 'Band width'},
+        ],
+      },
+      'plots': bandPlots,
+    };
+
+const bandPlots = [
+  {'index': 0, 'name': 'Mid', 'label': 'Middle', 'color': 'blue', 'style': 'solid', 'width': 1.5},
+  {'index': 1, 'name': 'Upper', 'label': 'Upper band', 'color': 'amber', 'style': 'dashed', 'width': 1},
+];
+
+/// A hand-made indicator output folder (SPEC §7.7) over the fake run's 120 M1 bars
+/// (2022-03-01 00:00 UTC on). Plot values are set when their bar completes (stamp = next bar open):
+/// - plot 0 "Mid" (blue, solid): bar i → 100 + i/100 for i = 0..119, EMPTY_VALUE (empty) for bars
+///   40..44; bar 60 repainted at 01:10:00 to 101.5 (first 100.6 at 01:01:00). Bar 119's value is
+///   stamped 02:00:00, after the run's last tick (01:59:59), so it is never shown with the run.
+/// - plot 1 "Upper" (amber, dashed): every 10th bar → 100.5
+/// - objects: zone "g" created 00:12 (t1 00:10, 100.6/100.4, open-ended), moved at 00:30 to end
+///   00:30, deleted 01:30, re-created 01:40 (t1 01:35, open-ended); marker "mk" at 00:20 (t1 00:19);
+///   line "ln" created 00:50 (t1 00:45 → open end), a move of "nope" (doesn't exist) at 00:55
+/// - journal: two lines
+Directory writeFakeIndicator({Directory? dir, String dataPath = '/x/m1.csv', bool header = true}) {
+  final d = dir ?? Directory('${tempDir().path}/band_0123456789abcdef')
+    ..createSync(recursive: true);
+  void w(String name, String text) => File('${d.path}/$name').writeAsStringSync(text);
+  w('indicator.json', const JsonEncoder.withIndent(' ').convert({
+    'kind': 'indicator',
+    'engine': {'version': '0.2.0', 'git': 'test'},
+    'indicator': {'name': 'Band', 'description': 'A test band', 'version': '1.0', 'path': '/x/build/indicators/band.so', 'sha256': 'ab'},
+    'data': {'path': dataPath, 'sha256': 'cd'},
+    'inputs': {'Tf': 'M1', 'Period': '5', 'Width': '0.1'},
+    'from': null,
+    'to': null,
+    'tick_path': 'nearest',
+    'plots': bandPlots,
+    'counts': {'plot_records': 133, 'drawing_events': 8},
+    'warnings': [],
+    'cache_key': '0123456789abcdef0123456789abcdef',
+  }));
+  final rows = <(int, String)>[]; // (stamp ms, line) in emission order
+  for (var i = 0; i < 120; i++) {
+    final v = i >= 40 && i < 45 ? '' : '${100 + i / 100}';
+    rows.add((at(i + 1), '${atKey(i + 1)},0,${atKey(i)},$v'));
+    if (i % 10 == 0) rows.add((at(i + 1), '${atKey(i + 1)},1,${atKey(i)},100.5'));
+    if (i == 69) rows.add((at(70), '${atKey(70)},0,${atKey(60)},101.5')); // the repaint, at 01:10:00
+  }
+  w('plots.csv', '${header ? 'stamp,plot,time,value\n' : ''}${rows.map((r) => r.$2).join('\n')}\n');
+  w('drawings.jsonl', [
+    jsonEncode({'time': atKey(12), 'op': 'create', 'name': 'g', 'kind': 'zone', 't1': atKey(10), 'p1': 100.6, 't2': null, 'p2': 100.4, 'color': 'green', 'label': 'gap up'}),
+    jsonEncode({'time': atKey(20), 'op': 'create', 'name': 'mk', 'kind': 'marker', 't1': atKey(19), 'p1': 100.2, 'color': 'red', 'label': 'mark', 'shape': 'dot'}),
+    jsonEncode({'time': atKey(30), 'op': 'move', 'name': 'g', 'kind': 'zone', 't1': atKey(10), 'p1': 100.6, 't2': atKey(30), 'p2': 100.4}),
+    jsonEncode({'time': atKey(50), 'op': 'create', 'name': 'ln', 'kind': 'line', 't1': atKey(45), 'p1': 100.3, 't2': null, 'p2': 100.3, 'color': 'accent', 'label': ''}),
+    jsonEncode({'time': atKey(55), 'op': 'move', 'name': 'nope', 'kind': 'line', 't1': atKey(50), 'p1': 1.0, 't2': null, 'p2': 1.0}),
+    jsonEncode({'time': atKey(90), 'op': 'delete', 'name': 'g', 'kind': 'zone'}),
+    jsonEncode({'time': atKey(100), 'op': 'create', 'name': 'g', 'kind': 'zone', 't1': atKey(95), 'p1': 101.0, 't2': null, 'p2': 100.8, 'color': 'red', 'label': 'gap down'}),
+    '{"time":"2022-03-01 01:4', // a truncated last line is skipped
+  ].join('\n'));
+  w('journal.txt', '[${atKey(0)}] Band(5) on XAUUSD\n[${atKey(119)}] done\n');
+  return d;
+}
+
+/// Waits (real time) until [cond] holds: isolate parsing and engine events are asynchronous.
+Future<void> until(bool Function() cond, {String what = 'condition'}) async {
+  final sw = Stopwatch()..start();
+  while (!cond()) {
+    if (sw.elapsedMilliseconds > 5000) throw StateError('timed out waiting for $what');
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+  }
+}
+
+/// A fake `hummer serve` with the M7 indicator methods. Every start_indicator answers with
+/// [out] (a hand-made output folder); [onStart] can push events before the response goes out.
+class M7Engine {
+  M7Engine({this.supported = true}) {
+    engine = FakeEngine(_handle);
+  }
+
+  final bool supported;
+  late final FakeEngine engine;
+  String out = writeFakeIndicator().path;
+  bool cached = false;
+  int _jobs = 0;
+  void Function(String job)? onStart;
+  Map<String, String> status = const {'band': 'built', 'fvg': 'stale', 'donchian': 'not_built'};
+
+  dynamic _handle(String m, Map<String, dynamic> p) {
+    if (!supported && (m.contains('indicator'))) throw unknownMethod;
+    switch (m) {
+      case 'list_strategies':
+        return [];
+      case 'list_indicators':
+        return indicatorList(status);
+      case 'indicator_inputs':
+        return bandInputs();
+      case 'start_indicator':
+        final job = 'job-${++_jobs}';
+        onStart?.call(job);
+        return {'job_id': job, 'out': out, 'cached': cached};
+      case 'stop_indicator':
+        return {};
+      case 'build_indicator':
+        return {'build_id': 'build-1'};
+    }
+    throw EngineError('unknown_method', "unknown method '$m'");
+  }
+
+  void finish(String job, {String status = 'ok', bool cached = false, Map<String, dynamic> extra = const {}}) =>
+      engine.emit({'event': 'indicator_finished', 'job_id': job, 'status': status, 'out': out, 'cached': cached, 'exit_code': status == 'ok' ? 0 : 1, ...extra});
+}

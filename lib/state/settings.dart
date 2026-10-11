@@ -10,6 +10,23 @@ const kDefaultDataFile = '/home/bob/Documents/fxdata/xauusd_m1_2021-01-01_2026-1
 /// Cost overrides offered in the tester, as `hummer run` options (SPEC §8, CLI).
 const kCostOptions = ['costs', 'spread', 'commission', 'slippage', 'seed', 'swap_mode', 'swap_long', 'swap_short', 'triple_swap_day'];
 
+/// An indicator attached to the chart (SPEC §14 M7): its name, the inputs the user set (the rest
+/// use the indicator's defaults) and whether it is shown. The list order is the drawing order.
+class IndicatorSetting {
+  IndicatorSetting(this.name, Map<String, String> inputs, {this.visible = true}) : inputs = Map.unmodifiable(inputs);
+  final String name;
+  final Map<String, String> inputs;
+  final bool visible;
+
+  Map<String, dynamic> toJson() => {'name': name, 'inputs': inputs, 'visible': visible};
+
+  static IndicatorSetting? fromJson(Object? j) {
+    if (j is! Map || j['name'] is! String || (j['name'] as String).isEmpty) return null;
+    final inp = j['inputs'];
+    return IndicatorSetting(j['name'] as String, {if (inp is Map) for (final e in inp.entries) '${e.key}': '${e.value}'}, visible: j['visible'] != false);
+  }
+}
+
 /// Everything remembered between sessions, in the app support folder (settings.json).
 /// Saves are debounced; a failed save is reported once and never blocks the app.
 class Settings {
@@ -37,6 +54,13 @@ class Settings {
 
   /// Runs ticked for comparison and the run last opened (restored after a restart).
   String? lastRunDir;
+
+  /// The data file shown on the chart without a run (Indicators → Open chart), restored when no
+  /// run is. Null while a run is open.
+  String? chartDataFile;
+
+  /// Indicators attached to the chart, recomputed (cache hits) at startup.
+  List<IndicatorSetting> indicators = [];
 
   String get binary => engineBinary.isNotEmpty ? engineBinary : '$engineRepo/build/release/hummer';
   String get runsDir => '$engineRepo/runs';
@@ -73,6 +97,9 @@ class Settings {
     leverage = str('leverage', leverage);
     lastStrategy = j['last_strategy'] as String?;
     lastRunDir = j['last_run'] as String?;
+    chartDataFile = j['chart_data_file'] is String ? j['chart_data_file'] as String : null;
+    final ind = j['indicators'];
+    if (ind is List) indicators = [for (final x in ind) ?IndicatorSetting.fromJson(x)];
     final inp = j['inputs'];
     if (inp is Map) {
       for (final e in inp.entries) {
@@ -105,6 +132,8 @@ class Settings {
         'leverage': leverage,
         'last_strategy': lastStrategy,
         'last_run': lastRunDir,
+        'chart_data_file': chartDataFile,
+        'indicators': [for (final i in indicators) i.toJson()],
         'inputs': inputs,
         'costs': costs,
         'protected_periods': {for (final e in protectedPeriods.entries) e.key: e.value?.toJson()},

@@ -40,8 +40,14 @@ abstract class ChartLayer {
   String get description;
   bool available(AppState s) => true;
 
+  /// Painted now: available and switched on (indicator layers carry their own visibility).
+  bool isOn(AppState s) => available(s) && s.layersOn.contains(id);
+
   void paintBelow(Canvas canvas, ChartGeometry g, LayerContext ctx) {}
   void paintAbove(Canvas canvas, ChartGeometry g, LayerContext ctx) {}
 }
 
 const List<ChartLayer> chartLayers = [TradesLayer(), DrawingsLayer(), FvgLayer()];
+
+/// The fixed layers, then one per attached indicator (in the Indicators order, later on top).
+List<ChartLayer> layersOf(AppState s) => [...chartLayers, ...s.indicatorLayers];

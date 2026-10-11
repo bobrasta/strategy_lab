@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import '../data/candle_cache.dart';
 import '../data/loaders.dart';
 import '../engine/engine_service.dart';
+import '../indicators/indicators_state.dart';
 import '../run/equity_store.dart';
 import '../run/history.dart';
 import '../run/protection.dart';
@@ -70,8 +71,11 @@ class InputSpec {
 const kStrategyTimeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
 class BuildState {
-  BuildState(this.buildId, this.name);
+  BuildState(this.buildId, this.name, {this.kind = 'strategy'});
   final String buildId, name;
+
+  /// strategy or indicator (SPEC §8.2: build events of indicators carry `kind: "indicator"`).
+  final String kind;
   final List<String> lines = [];
   String status = 'running'; // running / ok / failed / stopped
   double? seconds;
@@ -103,13 +107,21 @@ class CompareData {
 /// The tester: engine lifecycle, strategies and builds, inputs and settings, runs, history.
 /// All numbers it shows come from engine output; it only reads, filters and lays them out.
 class LabState extends ChangeNotifier {
-  LabState({required this.chart, required this.settings, this.cacheDir})
-      : engine = EngineService(binary: settings.binary, workingDir: settings.engineRepo);
+  /// [engine] is for tests (a fake service); the app starts the real one.
+  LabState({required this.chart, required this.settings, this.cacheDir, EngineService? engine})
+      : engine = engine ?? EngineService(binary: settings.binary, workingDir: settings.engineRepo) {
+    this.engine.addListener(notifyListeners);
+    _sub = this.engine.events.listen(_onEvent);
+    indicators = IndicatorsState(engine: this.engine, chart: chart, settings: settings);
+  }
 
   final AppState chart;
   final Settings settings;
   final String? cacheDir;
   final EngineService engine;
+
+  /// Navigator → Indicators and the indicators attached to the chart (M7).
+  late final IndicatorsState indicators;
 
   EngineFreshness? freshness;
   EngineBuild? engineBuild;
@@ -150,14 +162,15 @@ class LabState extends ChangeNotifier {
 
   // ── lifecycle ───────────────────────────────────────────────────────
   Future<void> init() async {
-    engine.addListener(notifyListeners);
-    _sub = engine.events.listen(_onEvent);
     unawaited(loadProfile());
     unawaited(refreshHistory().then((_) => _restoreLastRun()));
     await checkEngine();
     if (!(freshness?.missing ?? true)) await startEngine();
     _poll = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (engine.ready && !(build?.running ?? false)) refreshStrategies();
+      if (engine.ready && !(build?.running ?? false)) {
+        refreshStrategies();
+        if (indicators.unsupported == null) indicators.refresh();
+      }
     });
   }
 
@@ -173,7 +186,11 @@ class LabState extends ChangeNotifier {
     await engine.start();
     if (engine.ready) {
       await refreshStrategies();
+      await indicators.refresh();
+      indicators.syncAll();
       await refreshHistory();
+    } else {
+      indicators.unsupported = null;
     }
   }
 
@@ -225,6 +242,7 @@ class LabState extends ChangeNotifier {
 
   // ── engine events ───────────────────────────────────────────────────
   void _onEvent(Map<String, dynamic> e) {
+    if ('${e['event']}'.startsWith('indicator_') || e['event'] == 'engine_exited') indicators.onEvent(e);
     final rid = e['run_id'];
     if (rid is String && progress?.runId != rid && '${e['event']}'.startsWith('run_')) {
       if (_early.length > 20) _early.remove(_early.keys.first);
@@ -241,11 +259,15 @@ class LabState extends ChangeNotifier {
         if (b != null && b.buildId == e['build_id']) {
           b.status = '${e['status'] ?? (e['ok'] == true ? 'ok' : 'failed')}';
           b.seconds = (e['seconds'] as num?)?.toDouble();
-          schemas.remove(b.name);
-          schemaErrors.remove(b.name);
-          refreshStrategies().then((_) {
-            if (b.status == 'ok' && b.name == strategy) loadSchema(b.name);
-          });
+          if (b.kind == 'indicator') {
+            indicators.onBuilt(b.name, b.status == 'ok');
+          } else {
+            schemas.remove(b.name);
+            schemaErrors.remove(b.name);
+            refreshStrategies().then((_) {
+              if (b.status == 'ok' && b.name == strategy) loadSchema(b.name);
+            });
+          }
         }
       case 'run_queued':
         if (progress?.runId == e['run_id']) progress!.state = 'queued';
@@ -362,6 +384,24 @@ class LabState extends ChangeNotifier {
       chart.showTab(ResultsTab.build);
     } on EngineError catch (e) {
       chart.showError("Build couldn't start: ${e.message}");
+    }
+    notifyListeners();
+  }
+
+  /// Builds `indicators/<name>.cpp` (same script and flags as strategies); output in the Build tab.
+  Future<void> buildIndicator(String name) async {
+    if (build?.running ?? false) return;
+    try {
+      final r = (await engine.request('build_indicator', {'name': name})) as Map;
+      build = BuildState('${r['build_id']}', name, kind: 'indicator');
+      chart.showTab(ResultsTab.build);
+    } on EngineError catch (e) {
+      if (isUnknownMethod(e)) {
+        indicators.unsupported = IndicatorsState.kUnsupported;
+        indicators.refresh();
+      } else {
+        chart.showError("Build couldn't start: ${e.message}");
+      }
     }
     notifyListeners();
   }
@@ -582,10 +622,43 @@ class LabState extends ChangeNotifier {
   }
 
   Future<void> _restoreLastRun() async {
+    if (chart.loaded || opening != null) return;
     final d = settings.lastRunDir;
-    if (d == null || chart.run != null) return;
-    final m = history.where((h) => h.dir == d).firstOrNull;
-    if (m != null && m.ok && isVisible(m)) await openRun(m);
+    final m = d == null ? null : history.where((h) => h.dir == d).firstOrNull;
+    if (m != null && m.ok && isVisible(m)) {
+      await openRun(m);
+    } else if (settings.chartDataFile != null && File(settings.chartDataFile!).existsSync()) {
+      await openDataChart(settings.chartDataFile);
+    }
+  }
+
+  /// Shows a data file's candles without a run (default: the Tester's data file), so indicators
+  /// can be attached to it. The whole file is shown.
+  Future<bool> openDataChart([String? path]) async {
+    final p = path ?? settings.dataFile, cache = cacheDir;
+    if (!File(p).existsSync()) {
+      chart.showError('The data file $p does not exist.');
+      return false;
+    }
+    opening = 'Opening ${baseName(p)}…';
+    notifyListeners();
+    try {
+      final series = await Isolate.run(() => runSeries(p, cache, null));
+      await chart.showData(series, p);
+      settings
+        ..chartDataFile = p
+        ..lastRunDir = null;
+      settings.changed();
+      return true;
+    } on LoadError catch (e) {
+      chart.showError('Candles: ${e.message}');
+    } catch (e) {
+      chart.showError("The data file couldn't be opened: $e");
+    } finally {
+      opening = null;
+      notifyListeners();
+    }
+    return false;
   }
 
   /// Opens a finished run: its files, its equity index and the candles of its data file,
@@ -620,7 +693,9 @@ class LabState extends ChangeNotifier {
           'The data file has changed since this run; the candles may not match its trades.',
       ];
       if (notes.isNotEmpty) chart.showNotice(notes.join(' '));
-      settings.lastRunDir = m.dir;
+      settings
+        ..lastRunDir = m.dir
+        ..chartDataFile = null;
       settings.changed();
       return true;
     } on RunLoadError catch (e) {
@@ -676,6 +751,7 @@ class LabState extends ChangeNotifier {
   void dispose() {
     _poll?.cancel();
     _sub?.cancel();
+    indicators.dispose();
     engine.removeListener(notifyListeners);
     engine.dispose();
     super.dispose();

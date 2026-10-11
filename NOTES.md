@@ -2,6 +2,18 @@
 
 ## Done
 
+### M7: Indicators (app side, 2026-10-11)
+Client written to SPEC §7.7 / §8.2 / §14 "Strategy Lab (M7, indicators)" before the engine side exists. **Verified against the real engine: pending** (the engine's M7 isn't built yet; everything below is tested against hand-made output folders and a fake service).
+- **Indicators panel** (right drawer, shared with the Tester; top bar **Indicators**, rail icon): `list_indicators` with built / stale / not built (polled with the strategies every 4 s), **Build** via `build_indicator` (same build slot and Build tab as strategies; `BuildState.kind` tells them apart, so an indicator build refreshes the indicator list and recomputes its instances, not the strategy list), **Add** → the inputs form from `indicator_inputs` (the Tester's `InputRow`, now in `widgets/input_form.dart`, plus the declared plots as swatches) → **Add to chart**.
+- **Jobs:** `start_indicator {indicator, data, inputs, profile}` on the chart's data file (`AppState.candlesPath`), whole file (no from/to); progress from `indicator_queued/started/progress`; `indicator_finished` → the output folder is read in an isolate. Events that arrive before the response (a cache hit "follows at once") are buffered per job, as for runs. Failures show the error, signal / exit code and the journal / stderr tails, with **Retry**. Remove or Edit while running → `stop_indicator`; late events of an old job are dropped (per-instance generation).
+- **No indicator support** (today's engine answers `unknown_method`): the panel shows "This engine has no indicator support. Use Build engine, or update the engine." with Build / Restart engine, and nothing else; no job is started; re-probed on every engine start.
+- **Instances:** several, also of the same indicator; label like MT5's from the non-default inputs in schema order (`fvg (M15, 0.10)`). Each is a `ChartLayer` (`IndicatorLayer`) after the fixed layers; the rail's Layers list has show/hide, Edit inputs (opens the drawer's form on it) and Remove. Identical instances share one parsed output (same cache folder; concurrent reads deduplicated).
+- **Rendering:** plots per index in their palette colour (the drawings' token map), solid/dashed, width; EMPTY_VALUE breaks the line; at most four vertices per pixel column (first/low/high/last) so a zoomed-out M1 plot stays cheap. Objects go through the strategy-drawings renderer (`DrawingsLayer.paintZones/paintObjects`, extracted for reuse). Only the visible range is walked.
+- **Display rule** (§7.7): plot records are indexed per plot by bar time (stamp order within a bar); at `now` each bar time shows its latest record with stamp ≤ now. Objects: per object "life" the folded state after each event (same fold as runs: `createDrawObj` / `moveDrawObj`, extracted from `RunView`), the version at `now` found by walking its few versions; culling by exact extent, plus a per-64-lives max-end index that skips closed history. `now` is `LayerContext.nowMs`, so Explore shows what is known at the chart's last bar (a run's end) and Replay obeys the cursor.
+- **Data-only chart:** without a run, **Open chart** (panel or empty chart) shows the Tester's data file on its own (`LabState.openDataChart`, `AppState.showData`), restored at startup when no run is (`chart_data_file`).
+- **Persistence:** `indicators: [{name, inputs, visible}]` (order = drawing order) in settings.json; restored at startup and computed when the engine is ready and a chart is open; all recomputed when the chart's data file changes (outputs for another file are dropped at once).
+- **Tests** (+26): parsing (header / no header / CRLF, empty value, truncated drawings line), repaint before/after the second stamp, nothing stamped after now for every cursor, gaps, window ± 1, objects = the run-drawings fold at every minute, culling, the layer painted in Explore/Replay/M5/M15, labels, a 2M-record + 300k-event scale check; the fake-service flow (add, progress, edit with a cache hit answered before the response, hide, remove + stop, failure + retry, restore + data-file change, indicator build, engine exit, unknown method); widgets at 1440×900 and 1920×1037; settings round-trip. `test/support.dart` has `writeFakeIndicator`, `FakeEngine` and `M7Engine`.
+
 ### M6 B: Strategy Lab (2026-10-10)
 - **Rename** from FVG Lab: package `strategy_lab`, binary `strategy_lab`, app id `com.example.strategy_lab`, title "Strategy Lab". The FVG-study panels (stats, comparison card, events table, predict mode, bookmarks, drill-down, sample presets) are removed; the FVG zones stay as an optional overlay layer.
 - **Engine service:** `EngineService` launches `hummer serve` from the engine repo (setting; default `/home/bob/projects/hummer-engine`, binary `build/release/hummer`), checks protocol 1, shows starting / ready / error. Build engine when the binary is missing or older than `engine/ cli/ sdk/ CMakeLists.txt`; Restart engine. Exit: `shutdown`, 2 s, SIGKILL.
@@ -19,6 +31,7 @@
 
 ## Verified
 
+- M7: `flutter analyze` no issues; `flutter test` 88 passing (62 + 26 indicator tests). Against the real engine: pending (engine M7 not implemented yet).
 - `flutter analyze`: no issues. `flutter test`: 62 passing (graph zoom: window buckets vs the rows, isolate bucketing, window points under a replay cut, time ticks, wheel/double-click/Full range; fast parsers bit-identical to `double.parse` on 200k values; equity store vs a linear scan across block boundaries; replay rules bar by bar on a hand-made run; protected periods; settings round-trip; app = CLI trades from a real engine run; widgets at 1440×900 and 1920×1037).
 - Acceptance against the real engine (`integration_test/`): build fvg_continuation, run 2021-01-01..2023-12-31, open, replay a trade; To = 2024-03-31 → Start shows the protected-period dialog, Cancel starts nothing; restart (new process, same settings) → settings remembered, the run reopens from History and replays; `pgrep hummer` empty after each.
 - `kill -9` of a worker mid-run → "Run failed · SIGKILL", the next run works. `kill -9` of the app → the service exits (parent-death signal). Window close → `shutdown` logged, no processes left.
@@ -32,6 +45,7 @@
 | Scan the full-data per-M1 `equity.csv` (2,045,853 rows, 288 MB) | 3.1 s (isolate) |
 | Equity row at the cursor (block read + parse) | ~2 ms on a cache miss |
 | Full ma_cross run 2021–2026 + open, profile mode | 9.2 s; worst UI event-loop gap **65 ms** |
+| Indicator output: 2M plot records + 300k drawing events (isolate, JIT) | parse ~3.0–3.5 s; one frame's lookups (5,000-bar window): plot ~1.1 ms, objects ~0.7 ms (JIT, test) |
 | Graph zoom re-bucket (275 MB file, isolate, JIT; window ± 25%) | 1 week 44 ms · 1 month 84 ms · 1 year 1.1 s |
 
 ## Decisions
@@ -45,6 +59,12 @@
 - Chart candles stop at the run's last simulated bar; bars after the run are never shown with it.
 - Integration tests run in debug mode, where JIT warm-up adds UI pauses; the stall budget is checked in profile mode (`flutter drive --profile`).
 
+- **Indicators (M7):** instances store only non-default inputs (as the Tester), so the label lists exactly those and a rebuilt indicator's new defaults apply. Add is enabled for an indicator with an `.so` (built or stale), like Start for strategies; stale is flagged gold. Indicators are computed on the whole data file, not the run's From/To, so the cache key doesn't depend on the run and switching runs on the same file costs nothing; the display rule cuts them at the chart's end. `profile` is sent as the Tester's profile path. Editing inputs clears the old output at once (old values never show under the new label); a successful rebuild recomputes the instances but keeps the old lines until the new output arrives. Plot points of a finer timeframe than the chart's are placed inside the chart bar by time; the price autoscale stays on candles only.
+- **Indicator protocol details the engine must match** (the client also accepts the alternatives noted): `indicator_inputs` → `{schema, plots}` with `schema` = the `hummer inputs` object (its `inputs` list is read; a bare list is accepted too) and `plots` = `[{index, name, label, color, style, width}]`; `start_indicator` → `{job_id, out, cached}`; events keyed by `job_id`; `indicator_progress` like `run_progress` (`pct`, `sim_time`, `stage`); `indicator_finished` `{job_id, status ok/failed/stopped, out, cached, exit_code, signal, error, journal_tail, stderr_tail}`; `unknown_method` as the error code of a method the engine lacks. `plots.csv`: header line `stamp,plot,time,value` (optional for the parser), times `YYYY-MM-DD HH:MM:SS`, plot as a decimal index, empty value = EMPTY_VALUE (a number ≥ 1e300 is read as EMPTY_VALUE too), rows in emission order. `indicator.json`: `plots` (as above) and `warnings` (list of strings) are read; everything else is shown nowhere yet.
+
 ## Left / ideas
+
+- Indicators, still to verify against the real engine once M7 lands: the method/event field names above, `plots.csv`'s header and EMPTY_VALUE encoding, `indicator_inputs`' `schema` shape, a cached start answered with `indicator_finished` right away, the build events' `kind`, and the M7 acceptance run (build, add with inputs, Explore, Replay, edit, remove, restart; re-adding is a cache hit).
+- Indicator values in the OHLC readout (MT5's Data Window), and a sub-window for oscillators (SPEC: main chart only in v1).
 
 - A per-deal x-axis on the graph, like MT5's.

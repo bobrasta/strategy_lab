@@ -152,6 +152,18 @@ class DrawEvent {
   String get name => '${j['name']}';
 }
 
+/// One drawings.jsonl line (SPEC §7.4), or null for an empty or malformed line (a malformed line
+/// can only come from a truncated file). Shared by runs and indicator outputs.
+DrawEvent? parseDrawLine(String l) {
+  if (l.isEmpty) return null;
+  try {
+    final j = (jsonDecode(l) as Map).cast<String, dynamic>();
+    return DrawEvent(engineMs(j['time']) ?? 0, j);
+  } catch (_) {
+    return null;
+  }
+}
+
 class JournalLine {
   const JournalLine(this.ms, this.text);
   final int ms;
@@ -233,24 +245,23 @@ RunData loadRunFiles(String dir) {
         }(),
   ];
 
-  final drawings = <DrawEvent>[];
-  for (final l in const LineSplitter().convert(read('drawings.jsonl', required: false))) {
-    if (l.isEmpty) continue;
-    try {
-      final j = (jsonDecode(l) as Map).cast<String, dynamic>();
-      drawings.add(DrawEvent(engineMs(j['time']) ?? 0, j));
-    } catch (_) {
-      // a malformed line can only come from a truncated file; skip it
-    }
-  }
+  final drawings = <DrawEvent>[
+    for (final l in const LineSplitter().convert(read('drawings.jsonl', required: false))) ?parseDrawLine(l),
+  ];
 
+  final journal = parseJournal(read('journal.txt', required: false));
+  return RunData(manifest: m, trades: trades, dealHeader: header, deals: deals, drawings: drawings, journal: journal);
+}
+
+/// journal.txt: `[YYYY-MM-DD HH:MM:SS] message`; a line without a stamp keeps the previous one's.
+List<JournalLine> parseJournal(String text) {
   final journal = <JournalLine>[];
-  for (final l in const LineSplitter().convert(read('journal.txt', required: false))) {
+  for (final l in const LineSplitter().convert(text)) {
     if (l.length > 22 && l.startsWith('[') && l[20] == ']') {
       journal.add(JournalLine(engineMs(l.substring(1, 20)) ?? 0, l.substring(22)));
     } else if (l.isNotEmpty) {
       journal.add(JournalLine(journal.isEmpty ? 0 : journal.last.ms, l));
     }
   }
-  return RunData(manifest: m, trades: trades, dealHeader: header, deals: deals, drawings: drawings, journal: journal);
+  return journal;
 }

@@ -100,7 +100,7 @@ EquityRow? _row(Uint8List b, int s, int e, _Cols c, CsvLine f) {
 
 /// Calls [take] for every non-empty line in the byte range [start, end) of [raf], reading it in
 /// 8 MB chunks (never a whole ~290 MB file in memory). [start] must be at a line start.
-void _forEachLine(RandomAccessFile raf, int start, int end, void Function(Uint8List b, int s, int e, int off) take) {
+void forEachLine(RandomAccessFile raf, int start, int end, void Function(Uint8List b, int s, int e, int off) take) {
   const chunk = 8 << 20;
   var buf = Uint8List(min(chunk, end - start) + 4096);
   var have = 0, off = start; // bytes in buf; file offset of buf[0]
@@ -160,7 +160,7 @@ EquityIndex scanEquityFile(String path, {int targetBuckets = 3000}) {
     final perBucket = max(1, (len / avg / targetBuckets).ceil());
 
     final sc = _Scan(cols, header.length, perBucket);
-    _forEachLine(raf, nl + 1, len, sc.take);
+    forEachLine(raf, nl + 1, len, sc.take);
     return EquityIndex(
       fileLen: len,
       rows: sc.rows,
@@ -190,7 +190,7 @@ GraphBuckets scanEquityRange(String path, List<String> columns, int offStart, in
     final cols = _Cols(columns);
     final sc = _Scan(cols, columns.length, perBucket);
     final probe = CsvLine(columns.length + 2);
-    _forEachLine(raf, offStart, offEnd, (b, s, e, off) {
+    forEachLine(raf, offStart, offEnd, (b, s, e, off) {
       probe.split(b, s, e);
       if (probe.count < cols.count) return;
       final ms = parseTimeBytes(b, probe.start(cols.time), probe.end(cols.time));

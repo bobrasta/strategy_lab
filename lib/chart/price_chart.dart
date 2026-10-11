@@ -193,7 +193,7 @@ class ChartPainter extends CustomPainter {
     final c = s.candles;
     if (c == null || c.length == 0) return;
     final cur = s.visibleCursor;
-    final layers = chartLayers.where((l) => l.available(s) && s.layersOn.contains(l.id)).toList();
+    final layers = layersOf(s).where((l) => l.isOn(s)).toList();
     final g = ChartGeometry.compute(size, s, c, cur, 0);
     onGeometry(g);
     final pw = g.plotW, ph = g.plotH, ax = g.axisX;

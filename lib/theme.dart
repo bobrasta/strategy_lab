@@ -120,4 +120,5 @@ class AppIcons {
   static const tall = Icons.unfold_more;
   static const short = Icons.unfold_less;
   static const nextTrade = Icons.skip_next_rounded;
+  static const indicators = Icons.stacked_line_chart;
 }

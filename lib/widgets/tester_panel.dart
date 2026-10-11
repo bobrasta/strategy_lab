@@ -6,6 +6,7 @@ import '../theme.dart';
 import 'common.dart';
 import 'dialogs.dart';
 import 'fields.dart';
+import 'input_form.dart';
 
 /// Starts a run from the Tester settings, asking first when it overlaps a protected period.
 Future<void> startRunGuarded(BuildContext context, LabState lab) async {
@@ -78,7 +79,7 @@ class _StrategySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final info = lab.strategyInfo, b = lab.build;
-    final building = b != null && b.running && b.name == lab.strategy;
+    final building = b != null && b.running && b.kind == 'strategy' && b.name == lab.strategy;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const SectionLabel('Strategy'),
       const SizedBox(height: 8),
@@ -148,36 +149,9 @@ class _InputsSection extends StatelessWidget {
       else if (sc.isEmpty)
         Text('This strategy has no inputs.', style: ts(12, color: C.mute))
       else
-        for (final i in sc) _InputRow(lab: lab, spec: i),
+        for (final i in sc) InputRow(spec: i, value: lab.inputValue(i), onChanged: (v) => lab.setInput(i, v)),
     ]);
   }
-}
-
-class _InputRow extends StatelessWidget {
-  const _InputRow({required this.lab, required this.spec});
-  final LabState lab;
-  final InputSpec spec;
-
-  @override
-  Widget build(BuildContext context) {
-    final v = lab.inputValue(spec), err = spec.check(v), isDefault = v == spec.def;
-    final Widget control = switch (spec.type) {
-      'bool' => PillSwitch(value: v == 'true', onChanged: (x) => lab.setInput(spec, '$x')),
-      'timeframe' => PillMenu<String>(values: kStrategyTimeframes, selected: kStrategyTimeframes.contains(v) ? v : spec.def, onSelected: (x) => lab.setInput(spec, x), labelOf: (x) => x),
-      'choice' => PillMenu<String>(values: spec.choices, selected: spec.choices.contains(v) ? v : spec.def, onSelected: (x) => lab.setInput(spec, x), labelOf: (x) => x),
-      _ => PillField(value: v, hint: spec.def, width: 140, error: err != null, onChanged: (x) => lab.setInput(spec, x.trim().isEmpty ? spec.def : x.trim())),
-    };
-    final range = spec.min != null || spec.max != null ? ' · ${spec.min == null ? '' : _n(spec.min!)}–${spec.max == null ? '' : _n(spec.max!)}' : '';
-    return FormRow(
-      label: spec.name,
-      labelWidth: 120,
-      sub: err ?? '${spec.description}$range${isDefault ? '' : ' · default ${spec.def}'}',
-      subColor: err != null ? C.red : (isDefault ? C.mute : C.gold),
-      child: control,
-    );
-  }
-
-  static String _n(double x) => x == x.truncateToDouble() ? x.toInt().toString() : '$x';
 }
 
 class _DataSection extends StatelessWidget {
