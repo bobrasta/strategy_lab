@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../chart/volume_profile_tool.dart';
 import '../state/app_state.dart';
 import '../state/lab_state.dart';
 import '../theme.dart';
@@ -42,8 +43,12 @@ class OhlcReadout extends StatelessWidget {
 }
 
 class ChartToolbar extends StatelessWidget {
-  const ChartToolbar({super.key, required this.state});
+  const ChartToolbar({super.key, required this.state, this.tool, this.toolEnabled = true});
   final AppState state;
+
+  /// The volume profile drawing tool; [toolEnabled] false when the engine has no indicators.
+  final VolumeProfileTool? tool;
+  final bool toolEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -67,6 +72,17 @@ class ChartToolbar extends StatelessWidget {
         RoundIconButton(icon: AppIcons.zoomIn, tooltip: 'Zoom in', onTap: () => s.zoomBy(0.8)),
         RoundIconButton(icon: AppIcons.zoomOut, tooltip: 'Zoom out', onTap: () => s.zoomBy(1.25)),
         RoundIconButton(icon: AppIcons.fit, tooltip: 'Fit', onTap: s.fit),
+        if (tool != null) ...[
+          const VDivider(height: 16),
+          RoundIconButton(
+            key: const ValueKey('vp-tool'),
+            icon: AppIcons.volumeProfile,
+            tooltip: 'Volume profile: drag from one candle to another',
+            filled: tool!.active,
+            enabled: toolEnabled,
+            onTap: tool!.toggle,
+          ),
+        ],
         const VDivider(height: 16),
         if (s.run != null) ...[toggle('trades', 'Trades'), toggle('drawings', 'Drawings')],
         if (s.events.isNotEmpty) toggle('fvg', 'FVG zones'),
@@ -362,3 +378,25 @@ class EmptyState extends StatelessWidget {
   }
 }
 
+
+/// Shown while the volume profile tool is picked.
+class VolumeProfileHint extends StatelessWidget {
+  const VolumeProfileHint({super.key, required this.tool});
+  final VolumeProfileTool tool;
+
+  @override
+  Widget build(BuildContext context) => Glass(
+        key: const ValueKey('vp-hint'),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(AppIcons.volumeProfile, size: 14, color: C.text),
+          const SizedBox(width: 8),
+          Text(
+            tool.clicking ? 'Volume profile · click the last candle' : 'Volume profile · drag from the first candle to the last, or click both',
+            style: ts(12),
+          ),
+          const SizedBox(width: 10),
+          const Kbd('Esc'),
+        ]),
+      );
+}

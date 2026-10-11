@@ -55,6 +55,8 @@ flutter test integration_test/restart_test.dart    -d linux --dart-define=SETTIN
 # M7 indicators (build, add, Explore, Replay, edit, remove, cache hit; then restart), in a new empty settings folder:
 flutter test integration_test/indicators_test.dart         -d linux --dart-define=SETTINGS_DIR=/tmp/sl-ind
 flutter test integration_test/indicators_restart_test.dart -d linux --dart-define=SETTINGS_DIR=/tmp/sl-ind
+# The volume profile tool (drag candle to candle → engine profile; resize; delete), new empty settings folder:
+flutter test integration_test/volume_profile_tool_test.dart -d linux --dart-define=SETTINGS_DIR=/tmp/sl-vp
 # UI-stall measurement + kill -9 of a worker, in profile mode (like the installed app):
 flutter drive --profile -d linux --driver=test_driver/integration_test.dart \
   --target=integration_test/engine_test.dart --dart-define=SETTINGS_DIR=/tmp/sl-accept

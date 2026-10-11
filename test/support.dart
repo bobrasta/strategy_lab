@@ -220,6 +220,22 @@ Map<String, dynamic> bandInputs() => {
       'plots': bandPlots,
     };
 
+/// `indicator_inputs` for volume_profile (the engine's indicators/volume_profile.cpp inputs).
+Map<String, dynamic> vpInputs() => {
+      'schema': {
+        'abi': 2,
+        'name': 'VolumeProfile',
+        'kind': 'indicator',
+        'inputs': [
+          {'name': 'RangeFrom', 'type': 'string', 'default': '2022.03.01 00:30', 'description': 'Range start, UTC'},
+          {'name': 'RangeTo', 'type': 'string', 'default': '2022.03.01 01:00', 'description': 'Range end, exclusive, UTC'},
+          {'name': 'Rows', 'type': 'int', 'default': 50, 'description': 'Rows', 'min': 1, 'max': 1000},
+        ],
+        'plots': [],
+      },
+      'plots': [],
+    };
+
 const bandPlots = [
   {'index': 0, 'name': 'Mid', 'label': 'Middle', 'color': 'blue', 'style': 'solid', 'width': 1.5},
   {'index': 1, 'name': 'Upper', 'label': 'Upper band', 'color': 'amber', 'style': 'dashed', 'width': 1},
@@ -297,6 +313,10 @@ class M7Engine {
   bool cached = false;
   int _jobs = 0;
   void Function(String job)? onStart;
+
+  /// Params of every start_indicator, and the names of every build_indicator, in order.
+  final List<Map<String, dynamic>> starts = [];
+  final List<String> builds = [];
   Map<String, String> status = const {'band': 'built', 'fvg': 'stale', 'donchian': 'not_built'};
 
   dynamic _handle(String m, Map<String, dynamic> p) {
@@ -307,15 +327,17 @@ class M7Engine {
       case 'list_indicators':
         return indicatorList(status);
       case 'indicator_inputs':
-        return bandInputs();
+        return p['name'] == 'volume_profile' ? vpInputs() : bandInputs();
       case 'start_indicator':
+        starts.add(p);
         final job = 'job-${++_jobs}';
         onStart?.call(job);
         return {'job_id': job, 'out': out, 'cached': cached};
       case 'stop_indicator':
         return {};
       case 'build_indicator':
-        return {'build_id': 'build-1'};
+        builds.add('${p['name']}');
+        return {'build_id': 'build-${builds.length}'};
     }
     throw EngineError('unknown_method', "unknown method '$m'");
   }

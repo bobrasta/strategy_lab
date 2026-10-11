@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
+import '../chart/volume_profile_tool.dart';
 import '../data/candle_cache.dart';
 import '../data/loaders.dart';
 import '../engine/engine_service.dart';
@@ -122,6 +123,9 @@ class LabState extends ChangeNotifier {
 
   /// Navigator → Indicators and the indicators attached to the chart (M7).
   late final IndicatorsState indicators;
+
+  /// The chart's fixed range volume profile tool (drag from candle to candle).
+  late final VolumeProfileTool vpTool = VolumeProfileTool(chart: chart, indicators: indicators, build: buildIndicator);
 
   EngineFreshness? freshness;
   EngineBuild? engineBuild;

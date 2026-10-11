@@ -9,6 +9,7 @@ import '../state/app_state.dart';
 import '../state/lab_state.dart' show InputSpec, StrategyInfo;
 import '../state/settings.dart';
 import 'indicator_output.dart';
+import 'input_time.dart';
 
 // Top-level so the isolate closure captures only its arguments.
 Future<IndicatorOutput> _loadIso(String dir, List<PlotSpec> declared) => Isolate.run(() => loadIndicatorOutput(dir, declared: declared));
@@ -44,7 +45,8 @@ class IndicatorInstance {
   bool visible;
   String label = '';
 
-  /// idle (waiting for a chart or the engine) / starting / queued / running / loading / ok / failed / stopped
+  /// idle (waiting for a chart or the engine) / unbuilt (waiting for its build) / starting / queued / running /
+  /// loading / ok / failed / stopped
   String state = 'idle';
   String stage = '', simTime = '';
   double pct = 0;
@@ -68,6 +70,7 @@ class IndicatorInstance {
   /// One line for the panel and the Layers rail.
   String get status => switch (state) {
         'idle' => 'Waits for a chart and the engine',
+        'unbuilt' => 'Not built yet: computed after its build',
         'starting' => 'Starting…',
         'queued' => 'Queued…',
         'running' => stage == 'loading' || pct <= 0 ? 'Loading data…' : 'Computing ${pct.toStringAsFixed(1)} %${simTime.isEmpty ? '' : ' · $simTime'}',
@@ -282,6 +285,14 @@ class IndicatorsState extends ChangeNotifier {
     return i;
   }
 
+  /// A fixed range volume profile drawn on the chart (VolumeProfileTool): [from, to) in ms, UTC.
+  IndicatorInstance addProfile(int from, int to) =>
+      add(kVolumeProfile, {'RangeFrom': fmtInputTime(from), 'RangeTo': fmtInputTime(to)});
+
+  /// A drawn profile's edges moved: the new range, other inputs kept.
+  void setProfileRange(IndicatorInstance i, int from, int to) =>
+      setInputs(i, {...i.inputs, 'RangeFrom': fmtInputTime(from), 'RangeTo': fmtInputTime(to)});
+
   void setInputs(IndicatorInstance i, Map<String, String> inputs) {
     i.inputs = {...inputs};
     i.label = indicatorLabel(i.name, i.inputs, schemas[i.name]);
@@ -340,6 +351,15 @@ class IndicatorsState extends ChangeNotifier {
     final path = chart.candlesPath;
     if (i.removed || path == null || !engine.ready || unsupported != null) return;
     _forgetJob(i);
+    if (infoOf(i.name)?.status == 'not_built') {
+      // onBuilt starts it once its build succeeds
+      i.gen++;
+      i
+        ..state = 'unbuilt'
+        ..error = null;
+      _publish();
+      return;
+    }
     final gen = ++i.gen;
     if (i.dataFile != path) i.output = null;
     i

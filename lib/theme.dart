@@ -88,6 +88,7 @@ class AppIcons {
   static const zoomIn = Icons.zoom_in;
   static const zoomOut = Icons.zoom_out;
   static const fit = Icons.fit_screen_outlined;
+  static const volumeProfile = Icons.align_horizontal_left_rounded;
   static const selectBar = Icons.gps_fixed;
   static const calendar = Icons.calendar_today_outlined;
   static const replayEvent = Icons.history;

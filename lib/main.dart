@@ -77,11 +77,15 @@ class _StrategyLabAppState extends State<StrategyLabApp> {
       return true;
     }
     if (down && k == LogicalKeyboardKey.escape) {
+      if (widget.lab.vpTool.cancel()) return true;
       if (widget.lab.compare != null) {
         widget.lab.closeCompare();
       } else {
         s.escape();
       }
+      return true;
+    }
+    if (down && (k == LogicalKeyboardKey.delete || k == LogicalKeyboardKey.backspace) && widget.lab.vpTool.deleteSelected()) {
       return true;
     }
     if (!s.isReplay) return false;

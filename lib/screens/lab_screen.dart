@@ -21,7 +21,7 @@ class LabScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([lab, lab.chart, lab.indicators]),
+        listenable: Listenable.merge([lab, lab.chart, lab.indicators, lab.vpTool]),
         builder: (context, _) {
           final s = lab.chart, chrome = !s.focus;
           return Scaffold(
@@ -79,7 +79,7 @@ class LabScreen extends StatelessWidget {
         if (!s.loaded)
           Positioned.fill(child: EmptyState(lab: lab))
         else ...[
-          Positioned.fill(child: PriceChart(state: s)),
+          Positioned.fill(child: PriceChart(state: s, tool: lab.vpTool)),
           Positioned(
             left: 16,
             top: 14,
@@ -88,7 +88,8 @@ class LabScreen extends StatelessWidget {
               if (s.run != null) ...[const SizedBox(height: 10), IgnorePointer(child: RunReadout(state: s))],
             ]),
           ),
-          Positioned(top: 12, right: rightOpen ? 412 : 12, child: ChartToolbar(state: s)),
+          Positioned(top: 12, right: rightOpen ? 412 : 12, child: ChartToolbar(state: s, tool: lab.vpTool, toolEnabled: lab.indicators.unsupported == null)),
+          if (lab.vpTool.active) Positioned(top: 60, left: 0, right: rightOpen ? 412 : 0, child: Center(child: VolumeProfileHint(tool: lab.vpTool))),
           if (lab.opening != null || s.busy != null)
             Positioned(
               bottom: 64,
