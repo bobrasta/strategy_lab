@@ -50,4 +50,4 @@ abstract class ChartLayer {
 const List<ChartLayer> chartLayers = [TradesLayer(), DrawingsLayer(), FvgLayer()];
 
 /// The fixed layers, then one per attached indicator (in the Indicators order, later on top).
-List<ChartLayer> layersOf(AppState s) => [...chartLayers, ...s.indicatorLayers];
+List<ChartLayer> layersOf(AppState s) => [...chartLayers, ...s.indicatorLayers, ?s.practiceLayer];

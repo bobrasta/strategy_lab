@@ -45,7 +45,7 @@ class ProtectedPeriod {
 bool isIsoDate(String s) => RegExp(r'^\d{4}-\d\d-\d\d$').hasMatch(s) && DateTime.tryParse('${s}T00:00:00Z') != null;
 
 /// Protected by default until the user changes it (hard rule: FVG continuation runs on 2021–2023 only).
-const kDefaultProtection = {'fvg_continuation': ProtectedPeriod('2024-01-01')};
+const kDefaultProtection = {'fvg_continuation': ProtectedPeriod('2024-01-01'), 'builtin:practice': ProtectedPeriod('2024-01-01')};
 
 /// A logged confirmation (the file in the run's folder).
 class Confirmation {

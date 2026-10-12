@@ -13,13 +13,17 @@ import 'chart_layer.dart';
 import 'paint_utils.dart';
 import 'trades_layer.dart';
 import 'volume_profile_tool.dart';
+import '../practice/practice_layer.dart';
 
 class PriceChart extends StatefulWidget {
-  const PriceChart({super.key, required this.state, this.tool});
+  const PriceChart({super.key, required this.state, this.tool, this.practice});
   final AppState state;
 
   /// The volume profile drawing tool (drag from candle to candle; resize by the edges).
   final VolumeProfileTool? tool;
+
+  /// A practice session's chart side: drag SL/TP/order lines, pick prices (M8).
+  final PracticeChart? practice;
 
   @override
   State<PriceChart> createState() => _PriceChartState();
@@ -29,6 +33,7 @@ class _PriceChartState extends State<PriceChart> {
   ChartGeometry? _geo;
   AppState get s => widget.state;
   VolumeProfileTool? get tool => widget.tool;
+  PracticeChart? get practice => widget.practice;
 
   // Gesture tuning. Flip the sign of [_zoomPerPx] if two-finger up/down feels inverted.
   static const _zoomPerPx = 0.004; // trackpad: fingers up (negative dy) = zoom in
@@ -37,7 +42,7 @@ class _PriceChartState extends State<PriceChart> {
 
   double _panAcc = 0, _zoomAcc = 1, _lastScale = 1;
   Axis? _swipeAxis;
-  bool _dragAxis = false, _dragging = false, _overAxis = false, _dragTool = false;
+  bool _dragAxis = false, _dragging = false, _overAxis = false, _dragTool = false, _dragPractice = false;
   DateTime _lastAxisTap = DateTime(2000);
 
   bool _onAxis(Offset p) {
@@ -111,7 +116,8 @@ class _PriceChartState extends State<PriceChart> {
   void _onDragStart(DragStartDetails d) {
     _dragAxis = _onAxis(d.localPosition);
     final g = _geo;
-    _dragTool = !_dragAxis && g != null && (tool?.dragStart(g, d.localPosition) ?? false);
+    _dragPractice = !_dragAxis && g != null && (practice?.dragStart(g, d.localPosition) ?? false);
+    _dragTool = !_dragAxis && !_dragPractice && g != null && (tool?.dragStart(g, d.localPosition) ?? false);
     _panAcc = 0;
     setState(() => _dragging = true);
   }
@@ -119,6 +125,10 @@ class _PriceChartState extends State<PriceChart> {
   void _onDrag(DragUpdateDetails d) {
     final g = _geo;
     if (g == null || !s.loaded) return;
+    if (_dragPractice) {
+      practice!.dragUpdate(g, d.localPosition);
+      return;
+    }
     if (_dragTool) {
       tool!.dragUpdate(g, d.localPosition);
       return;
@@ -140,7 +150,10 @@ class _PriceChartState extends State<PriceChart> {
       s.hover.value = null;
       return;
     }
-    if (!_dragging) tool?.hover(g, p);
+    if (!_dragging) {
+      tool?.hover(g, p);
+      practice?.hover(g, p);
+    }
     s.hover.value = HoverInfo(g.barAt(p.dx).clamp(0, s.n - 1).toInt(), p.dy);
   }
 
@@ -161,6 +174,7 @@ class _PriceChartState extends State<PriceChart> {
       s.startAt(h.bar);
       return;
     }
+    if (practice?.tap(g, p) ?? false) return; // a price field waiting for a click
     if (tool?.active ?? false) {
       tool!.tap(g, p);
       return;
@@ -178,7 +192,9 @@ class _PriceChartState extends State<PriceChart> {
 
   void _endDrag(bool cancelled) {
     if (_dragTool) cancelled ? tool!.dragCancel() : tool!.dragEnd();
+    if (_dragPractice) cancelled ? practice!.dragCancel() : practice!.dragEnd();
     _dragTool = false;
+    _dragPractice = false;
     setState(() => _dragging = false);
   }
 
@@ -190,11 +206,13 @@ class _PriceChartState extends State<PriceChart> {
         onPointerPanZoomStart: _onSwipeStart,
         onPointerPanZoomUpdate: _onSwipe,
         child: MouseRegion(
-          cursor: _dragging
+          cursor: practice?.cursor() ??
+              (practice?.p.picking != null ? SystemMouseCursors.cell : null) ??
+              (_dragging
               ? (_dragAxis ? SystemMouseCursors.resizeUpDown : (_dragTool ? (tool!.drawing ? SystemMouseCursors.precise : SystemMouseCursors.resizeLeftRight) : SystemMouseCursors.grabbing))
               : (_overAxis
                   ? SystemMouseCursors.resizeUpDown
-                  : (tool?.hoverEdge != null ? SystemMouseCursors.resizeLeftRight : SystemMouseCursors.precise)),
+                  : (tool?.hoverEdge != null ? SystemMouseCursors.resizeLeftRight : SystemMouseCursors.precise))),
           onHover: (e) => _hover(e.localPosition),
           onExit: (_) => s.hover.value = null,
           child: GestureDetector(
@@ -208,14 +226,15 @@ class _PriceChartState extends State<PriceChart> {
             onPanUpdate: _onDrag,
             onPanEnd: (_) => _endDrag(false),
             onPanCancel: () => _endDrag(true),
-            child: CustomPaint(painter: ChartPainter(s, (g) => _geo = g, tool: tool), child: const SizedBox.expand()),
+            child: CustomPaint(painter: ChartPainter(s, (g) => _geo = g, tool: tool, practice: practice), child: const SizedBox.expand()),
           ),
         ),
       );
 }
 
 class ChartPainter extends CustomPainter {
-  ChartPainter(this.s, this.onGeometry, {this.tool}) : super(repaint: Listenable.merge([s, s.hover, ?tool]));
+  ChartPainter(this.s, this.onGeometry, {this.tool, this.practice}) : super(repaint: Listenable.merge([s, s.hover, ?tool, ?practice]));
+  final PracticeChart? practice;
   final AppState s;
   final VolumeProfileTool? tool;
   final void Function(ChartGeometry) onGeometry;

@@ -108,6 +108,7 @@ class ReplayTools extends StatelessWidget {
             fontSize: 12,
             color: s.selectMode ? C.gold : C.text,
             borderColor: s.selectMode ? C.gold : Colors.transparent,
+            enabled: !s.practiceLock, // it shows every bar
             onTap: s.toggleSelect,
           ),
           PillButton(label: 'Jump to date', icon: AppIcons.calendar, height: 28, fontSize: 12, variant: PillVariant.ghost, onTap: s.toggleJump),
@@ -230,7 +231,7 @@ class ReplayDock extends StatelessWidget {
                 Text(s.selectMode ? 'Future hidden after the cut' : '${fmtInt(cur - s.replayStart)} bars · $status', style: ts(11, color: C.mute)),
               ]),
             ),
-            PillButton(label: 'Exit replay', icon: AppIcons.close, height: 36, fontSize: 12, onTap: s.exitReplay),
+            PillButton(label: 'Exit replay', icon: AppIcons.close, height: 36, fontSize: 12, enabled: !s.practiceLock, onTap: s.exitReplay),
           ]),
         ),
       ),

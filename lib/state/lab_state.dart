@@ -7,6 +7,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 
 import '../chart/volume_profile_tool.dart';
+import '../practice/practice_layer.dart';
+import '../practice/practice_state.dart';
 import '../data/candle_cache.dart';
 import '../data/loaders.dart';
 import '../engine/engine_service.dart';
@@ -114,6 +116,24 @@ class LabState extends ChangeNotifier {
     this.engine.addListener(notifyListeners);
     _sub = this.engine.events.listen(_onEvent);
     indicators = IndicatorsState(engine: this.engine, chart: chart, settings: settings);
+    practice = PracticeState(engine: this.engine, chart: chart, settings: settings, openData: openDataChart, openRunDir: _openRunDir);
+    practiceChart = PracticeChart(practice);
+    chart.practiceLayer = PracticeLayer(practice, practiceChart);
+  }
+
+  /// Practice sessions (M8): manual trading in replay, executed by the engine.
+  late final PracticeState practice;
+  late final PracticeChart practiceChart;
+
+  /// A finished practice session's folder: listed in History and opened like any run.
+  Future<void> _openRunDir(String dir) async {
+    await refreshHistory();
+    final m = history.where((h) => h.dir == dir).firstOrNull;
+    if (m == null) {
+      chart.showError('The practice run $dir could not be read.');
+      return;
+    }
+    if (isVisible(m)) await openRun(m);
   }
 
   final AppState chart;
@@ -247,6 +267,7 @@ class LabState extends ChangeNotifier {
   // ── engine events ───────────────────────────────────────────────────
   void _onEvent(Map<String, dynamic> e) {
     if ('${e['event']}'.startsWith('indicator_') || e['event'] == 'engine_exited') indicators.onEvent(e);
+    if ('${e['event']}'.startsWith('session_') || e['event'] == 'engine_exited') practice.onEvent(e);
     final rid = e['run_id'];
     if (rid is String && progress?.runId != rid && '${e['event']}'.startsWith('run_')) {
       if (_early.length > 20) _early.remove(_early.keys.first);
@@ -756,6 +777,8 @@ class LabState extends ChangeNotifier {
     _poll?.cancel();
     _sub?.cancel();
     indicators.dispose();
+    practiceChart.dispose();
+    practice.dispose();
     engine.removeListener(notifyListeners);
     engine.dispose();
     super.dispose();

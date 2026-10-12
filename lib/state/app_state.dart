@@ -18,7 +18,7 @@ import '../run/run_view.dart';
 enum Mode { explore, replay }
 
 /// What the right drawer shows: MT5's Strategy Tester or its Navigator → Indicators.
-enum RightPanel { tester, indicators }
+enum RightPanel { tester, indicators, practice }
 
 /// Result-drawer tabs, after MT5's Strategy Tester.
 enum ResultsTab { backtest, graph, trades, deals, journal, history, build }
@@ -52,6 +52,14 @@ class AppState extends ChangeNotifier {
 
   /// One layer per attached indicator (set by the Indicators state), drawn after the fixed ones.
   List<ChartLayer> indicatorLayers = const [];
+
+  /// The practice session's layer (its trades, position and orders), drawn last.
+  ChartLayer? practiceLayer;
+
+  /// A practice session holds the chart in replay (M8): the chart (re)opens in replay with nothing after
+  /// this instant, and Explore and the select-a-bar mode (which show every bar) are off until it ends.
+  int? practiceAtMs;
+  bool get practiceLock => practiceAtMs != null;
 
   // FVG study overlay (optional; zones from fvg_events.csv, outcomes from Python).
   List<FvgEvent> events = const [];
@@ -118,7 +126,16 @@ class AppState extends ChangeNotifier {
   Future<void> showData(Map<String, Candles> bySeries, String path) => _show(null, bySeries, path, tf: timeframe);
 
   Future<void> _show(RunView? view, Map<String, Candles> bySeries, String path, {String? tf}) async {
-    _exitReplayQuiet();
+    if (practiceLock) {
+      // Never a frame of the whole file: replay on the first bar until the cursor is placed below.
+      mode = Mode.replay;
+      selectMode = false;
+      playing = false;
+      cursor = 0;
+      _syncTimer();
+    } else {
+      _exitReplayQuiet();
+    }
     run?.dispose();
     run = view;
     selectedTrade = null;
@@ -133,6 +150,7 @@ class AppState extends ChangeNotifier {
     timeframe = c == null ? m1.tf : want;
     _resetView();
     _mapEvents();
+    if (practiceAtMs != null) _lockAt(practiceAtMs!);
     notifyListeners();
   }
 
@@ -292,6 +310,7 @@ class AppState extends ChangeNotifier {
   void toggleLeft([bool? v]) => _set(() => leftOpen = v ?? !leftOpen);
   void toggleRight([bool? v]) => _togglePanel(RightPanel.tester, v);
   void toggleIndicators([bool? v]) => _togglePanel(RightPanel.indicators, v);
+  void togglePractice([bool? v]) => _togglePanel(RightPanel.practice, v);
   bool panelOpen(RightPanel p) => rightOpen && rightPanel == p;
 
   /// The Tester and the Indicators share the right drawer; opening one replaces the other.
@@ -314,6 +333,41 @@ class AppState extends ChangeNotifier {
       });
   void toggleFocus() => _set(() => focus = !focus);
   void toggleLayer(String id) => _set(() => layersOn.contains(id) ? layersOn.remove(id) : layersOn.add(id));
+
+  void lockPractice(int ms) {
+    practiceAtMs = ms;
+    if (loaded) _lockAt(ms);
+    notifyListeners();
+  }
+
+  void unlockPractice() {
+    if (practiceAtMs == null) return;
+    practiceAtMs = null;
+    notifyListeners();
+  }
+
+  /// Replay with the cursor on the last bar that ends by [ms].
+  void _lockAt(int ms) {
+    final c = candles!;
+    var i = c.barAt(ms);
+    while (i > 0 && c.endMs(i) > ms) {
+      i--;
+    }
+    mode = Mode.replay;
+    selectMode = false;
+    playing = false;
+    jumpOpen = false;
+    cursor = max(0, i);
+    replayStart = cursor;
+    viewStart = clampV(cursor - (zoom * 0.7).floor());
+    _syncTimer();
+  }
+
+  bool _lockedNotice() {
+    if (!practiceLock) return false;
+    showNotice('Practice keeps the chart in replay: pause or finish the session first.');
+    return true;
+  }
 
   void escape() => _set(() {
         selectMode = false;
@@ -389,7 +443,7 @@ class AppState extends ChangeNotifier {
   void setMode(Mode m) => m == Mode.replay ? enterReplay() : exitReplay();
 
   void enterReplay() {
-    if (isReplay || !loaded) return;
+    if (isReplay || !loaded || practiceLock) return;
     mode = Mode.replay;
     selectMode = true;
     playing = false;
@@ -408,6 +462,7 @@ class AppState extends ChangeNotifier {
   }
 
   void exitReplay() {
+    if (_lockedNotice()) return;
     _exitReplayQuiet();
     cursor = n - 1;
     viewStart = clampV(n - zoom);
@@ -426,6 +481,7 @@ class AppState extends ChangeNotifier {
   }
 
   void toggleSelect() {
+    if (_lockedNotice()) return;
     selectMode = !selectMode;
     playing = false;
     jumpOpen = false;

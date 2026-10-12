@@ -62,6 +62,9 @@ class Settings {
   /// Indicators attached to the chart, recomputed (cache hits) at startup.
   List<IndicatorSetting> indicators = [];
 
+  /// The practice session to resume (M8): {out, data, from, options, reached_ms}; null when none.
+  Map<String, dynamic>? practice;
+
   String get binary => engineBinary.isNotEmpty ? engineBinary : '$engineRepo/build/release/hummer';
   String get runsDir => '$engineRepo/runs';
   String get profilePath => '$engineRepo/profiles/xauusd.json';
@@ -98,6 +101,7 @@ class Settings {
     lastStrategy = j['last_strategy'] as String?;
     lastRunDir = j['last_run'] as String?;
     chartDataFile = j['chart_data_file'] is String ? j['chart_data_file'] as String : null;
+    practice = j['practice'] is Map ? Map<String, dynamic>.from(j['practice'] as Map) : null;
     final ind = j['indicators'];
     if (ind is List) indicators = [for (final x in ind) ?IndicatorSetting.fromJson(x)];
     final inp = j['inputs'];
@@ -134,6 +138,7 @@ class Settings {
         'last_run': lastRunDir,
         'chart_data_file': chartDataFile,
         'indicators': [for (final i in indicators) i.toJson()],
+        'practice': practice,
         'inputs': inputs,
         'costs': costs,
         'protected_periods': {for (final e in protectedPeriods.entries) e.key: e.value?.toJson()},

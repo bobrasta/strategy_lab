@@ -8,6 +8,7 @@ import '../widgets/chart_overlays.dart';
 import '../widgets/common.dart';
 import '../widgets/compare_view.dart';
 import '../widgets/indicators_panel.dart';
+import '../widgets/practice_panel.dart';
 import '../widgets/left_rail.dart';
 import '../widgets/results_drawer.dart';
 import '../widgets/tester_panel.dart';
@@ -21,7 +22,7 @@ class LabScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: Listenable.merge([lab, lab.chart, lab.indicators, lab.vpTool]),
+        listenable: Listenable.merge([lab, lab.chart, lab.indicators, lab.vpTool, lab.practice]),
         builder: (context, _) {
           final s = lab.chart, chrome = !s.focus;
           return Scaffold(
@@ -58,7 +59,11 @@ class LabScreen extends StatelessWidget {
         Expanded(child: _chartPanel(chrome, rightOpen)),
         if (chrome && !bottomOpen) ...[const SizedBox(height: 8), ResultsHandle(lab: lab)],
       ]),
-      if (rightOpen) Positioned(right: 0, top: 56, bottom: bottomOpen ? drawerH + 8 : 48, width: 400, child: s.rightPanel == RightPanel.indicators ? IndicatorsPanel(lab: lab) : TesterPanel(lab: lab)),
+      if (rightOpen) Positioned(right: 0, top: 56, bottom: bottomOpen ? drawerH + 8 : 48, width: 400, child: switch (s.rightPanel) {
+            RightPanel.indicators => IndicatorsPanel(lab: lab),
+            RightPanel.practice => PracticePanel(lab: lab),
+            _ => TesterPanel(lab: lab),
+          }),
       if (bottomOpen) Positioned(left: 0, right: 0, bottom: 0, height: drawerH, child: ResultsDrawer(lab: lab)),
       if (s.isReplay && s.loaded && cmp == null) ...[
         Positioned(left: 0, right: centreRight, bottom: dockBottom, child: Center(child: ReplayDock(state: s))),
@@ -79,7 +84,7 @@ class LabScreen extends StatelessWidget {
         if (!s.loaded)
           Positioned.fill(child: EmptyState(lab: lab))
         else ...[
-          Positioned.fill(child: PriceChart(state: s, tool: lab.vpTool)),
+          Positioned.fill(child: PriceChart(state: s, tool: lab.vpTool, practice: lab.practiceChart)),
           Positioned(
             left: 16,
             top: 14,
